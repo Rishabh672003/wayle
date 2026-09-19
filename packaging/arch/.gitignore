@@ -1,0 +1,4 @@
+pkg/
+src/
+wayle
+*.pkg.tar.zst
