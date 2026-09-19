@@ -58,12 +58,13 @@ impl FactoryComponent for SourceItem {
                 gtk::Box {
                     set_orientation: gtk::Orientation::Vertical,
                     set_hexpand: true,
-                    set_halign: gtk::Align::Start,
+                    set_halign: gtk::Align::Fill,
                     set_valign: gtk::Align::Center,
 
                     gtk::Label {
                         add_css_class: "media-source-option-name",
-                        set_halign: gtk::Align::Start,
+                        set_halign: gtk::Align::Fill,
+                        set_xalign: 0.0,
                         set_ellipsize: pango::EllipsizeMode::End,
                         #[watch]
                         set_label: &self.identity,
