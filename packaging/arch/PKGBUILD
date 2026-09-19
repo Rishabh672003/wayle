@@ -1,0 +1,35 @@
+# Maintainer: local build
+# Prebuilt, locally-compiled `wayle` binary (patched with battery OSD events).
+# Reuses every other file from the currently installed wayle-bin package and
+# swaps in the local `wayle` binary, so it is a complete drop-in replacement
+# and needs no recompilation of wayle-settings or completion regeneration.
+pkgname=wayle-local
+pkgver=0.7.0
+pkgrel=1
+pkgdesc="Wayland shell (locally-built wayle binary with battery OSD events)"
+arch=('x86_64')
+url="https://wayle.app/"
+license=('MIT')
+provides=('wayle' 'wayle-bin')
+conflicts=('wayle-bin')
+replaces=('wayle-bin')
+# Reuse whatever the installed wayle-bin already pulls in at runtime.
+depends=('hicolor-icon-theme')
+optdepends=('pipewire-pulseaudio' 'wireplumber' 'networkmanager' 'bluez'
+            'upower' 'power-profiles-daemon')
+options=('!strip')  # binary is already built without debuginfo
+source=('wayle')
+sha256sums=('SKIP')
+
+package() {
+    local _srcpkg=wayle-bin
+
+    # Copy every regular file the installed wayle-bin owns, preserving mode.
+    while read -r _pkg _path; do
+        [ -f "$_path" ] || continue
+        install -Dm"$(stat -c%a "$_path")" "$_path" "$pkgdir$_path"
+    done < <(pacman -Ql "$_srcpkg")
+
+    # Overwrite the shell binary with our patched build.
+    install -Dm755 "$srcdir/wayle" "$pkgdir/usr/bin/wayle"
+}
