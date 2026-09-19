@@ -21,7 +21,7 @@ use wayle_core::{DeferredService, Property};
 use wayle_hyprland::HyprlandService;
 use wayle_ipc::shell::APP_ID;
 use wayle_mango::MangoService;
-use wayle_media::MediaService;
+use wayle_media::{MediaService, core::player::Player, types::PlaybackState};
 use wayle_network::NetworkService;
 use wayle_niri::NiriService;
 use wayle_notification::NotificationService;
@@ -300,7 +300,7 @@ async fn init_daemon_services(
             .with_daemon()
             .with_art_cache()
             .ignored_players(ignored)
-            .priority_players(priority)
+            .priority_players(priority.clone())
             .build(),
     );
     let blocklist = Property::new(modules.notifications.blocklist.get());
@@ -324,10 +324,113 @@ async fn init_daemon_services(
         async { try_service!(timer, "SystemTray", spawned(systray_task), no_wrap) },
     );
 
+    if let Some(media) = &media {
+        spawn_active_media_autoswitch(media.clone(), priority);
+    }
+
     DaemonServices {
         audio,
         media,
         notification,
         systray,
+    }
+}
+
+/// Auto-switch the active media player to whichever player starts playing.
+///
+/// `wayle-media` only recomputes the active player when a player appears or
+/// disappears on the bus, never when an existing player's playback state
+/// changes. So pausing one app and playing another leaves the bar stuck on the
+/// first. This watches every player's playback state and, whenever the active
+/// player is not playing, promotes the best playing player (honoring the same
+/// priority patterns the service uses).
+fn spawn_active_media_autoswitch(media: Arc<MediaService>, priority: Vec<String>) {
+    use futures::StreamExt;
+
+    tokio::spawn(async move {
+        loop {
+            let players = media.players();
+            reevaluate_active_player(&media, &priority).await;
+
+            // players_monitored() emits the current list first; drop it so the
+            // inner loop only breaks on real list changes.
+            let mut list = Box::pin(media.players_monitored());
+            let _ = list.next().await;
+
+            if players.is_empty() {
+                if list.next().await.is_none() {
+                    break;
+                }
+                continue;
+            }
+
+            // Subscribe once per player-set. Each watch() emits its current
+            // value first (a harmless extra re-evaluation), then only on change.
+            // Holding `players` keeps the Properties alive so these never end
+            // until the next list change rebuilds them.
+            let mut playback = futures::stream::select_all(
+                players
+                    .iter()
+                    .map(|p| p.playback_state.watch().map(|_| ()).boxed())
+                    .collect::<Vec<_>>(),
+            );
+
+            loop {
+                tokio::select! {
+                    changed = list.next() => {
+                        if changed.is_none() {
+                            return;
+                        }
+                        break;
+                    }
+                    _ = playback.next() => {
+                        reevaluate_active_player(&media, &priority).await;
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// If the active player is not playing, promote the best playing player.
+///
+/// Leaves a playing active player alone so a manual selection sticks; only
+/// "rescues" from a paused/stopped/absent active player.
+// ponytail: last-playing-wins when active is idle; does not re-rank by priority
+// while the active player is still playing (matches the "switch to what I just
+// started" expectation). Tighten here if priority pre-emption is ever wanted.
+async fn reevaluate_active_player(media: &Arc<MediaService>, priority: &[String]) {
+    let active = media.active_player();
+    if active
+        .as_ref()
+        .is_some_and(|a| a.playback_state.get() == PlaybackState::Playing)
+    {
+        return;
+    }
+
+    let players = media.players();
+    let playing: Vec<Arc<Player>> = players
+        .into_iter()
+        .filter(|p| p.playback_state.get() == PlaybackState::Playing)
+        .collect();
+
+    let candidate = priority
+        .iter()
+        .find_map(|pattern| {
+            playing
+                .iter()
+                .find(|p| crate::glob::matches(pattern, p.id.bus_name()))
+                .cloned()
+        })
+        .or_else(|| playing.first().cloned());
+
+    let Some(candidate) = candidate else {
+        return;
+    };
+
+    if active.as_ref().is_none_or(|a| a.id != candidate.id)
+        && let Err(e) = media.set_active_player(Some(candidate.id.clone())).await
+    {
+        debug!("auto-switch active player failed: {e}");
     }
 }
