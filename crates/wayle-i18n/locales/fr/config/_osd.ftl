@@ -3,6 +3,9 @@
 settings-osd-enabled = Activé
     .description = Afficher les indicateurs à l'écran pour le volume, la luminosité, etc.
 
+settings-osd-battery = Événements de batterie
+    .description = Afficher un OSD lors du branchement/débranchement du chargeur, de la charge complète et de la batterie faible
+
 settings-osd-position = Position
     .description = Position de l'OSD à l'écran (ex. : haut-centre, bas-droite)
 

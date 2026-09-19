@@ -50,7 +50,8 @@ impl FactoryComponent for DailyItem {
             gtk::Label {
                 add_css_class: "daily-condition",
                 set_hexpand: true,
-                set_halign: gtk::Align::Start,
+                set_halign: gtk::Align::Fill,
+                set_xalign: 0.0,
                 set_ellipsize: gtk::pango::EllipsizeMode::End,
                 #[watch]
                 set_label: &self.condition,

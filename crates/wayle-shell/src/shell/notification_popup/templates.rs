@@ -3,7 +3,7 @@
 use gtk::prelude::*;
 use relm4::{WidgetTemplate, gtk, gtk::pango};
 
-const MAX_WIDTH_CHARS: i32 = 40;
+const MAX_WIDTH_CHARS: i32 = 52;
 const MAX_BODY_LINES: i32 = 3;
 
 /// Header, title, and body layout for a notification popup.
@@ -38,7 +38,9 @@ impl WidgetTemplate for NotificationContentTemplate {
             #[name = "title"]
             gtk::Label {
                 add_css_class: "notification-popup-title",
-                set_halign: gtk::Align::Start,
+                set_halign: gtk::Align::Fill,
+                set_xalign: 0.0,
+                set_hexpand: true,
                 set_ellipsize: pango::EllipsizeMode::End,
                 set_max_width_chars: MAX_WIDTH_CHARS,
             },
@@ -46,7 +48,9 @@ impl WidgetTemplate for NotificationContentTemplate {
             #[name = "body"]
             gtk::Label {
                 add_css_class: "notification-popup-body",
-                set_halign: gtk::Align::Start,
+                set_halign: gtk::Align::Fill,
+                set_xalign: 0.0,
+                set_hexpand: true,
                 set_use_markup: true,
                 set_wrap: true,
                 set_wrap_mode: pango::WrapMode::WordChar,

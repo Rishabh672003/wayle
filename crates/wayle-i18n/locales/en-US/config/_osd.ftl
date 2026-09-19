@@ -3,6 +3,9 @@
 settings-osd-enabled = Enabled
     .description = Show on-screen display overlays for volume, brightness, etc.
 
+settings-osd-battery = Battery Events
+    .description = Show an OSD popup on charger connect/disconnect, full charge, and low battery
+
 settings-osd-position = Position
     .description = Where on screen the OSD appears (e.g. top-center, bottom-right)
 

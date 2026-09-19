@@ -17,6 +17,11 @@ pub struct OsdConfig {
     #[default(true)]
     pub enabled: ConfigProperty<bool>,
 
+    /// Show an OSD popup on battery events: charger connected or disconnected,
+    /// fully charged, and low battery.
+    #[default(true)]
+    pub battery: ConfigProperty<bool>,
+
     /// Screen anchor position.
     #[default(OsdPosition::default())]
     pub position: ConfigProperty<OsdPosition>,

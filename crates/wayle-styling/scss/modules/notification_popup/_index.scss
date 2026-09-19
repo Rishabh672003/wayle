@@ -13,7 +13,7 @@
     --_urgency-shadow: 0 0 0 0 transparent;
     --_drop-shadow: 0 0 0 0 transparent;
 
-    min-width: calc(340px * var(--global-scale));
+    min-width: calc(420px * var(--global-scale));
     background: var(--bg-elevated);
     border-radius: var(--rounding-element);
     box-shadow: var(--_urgency-shadow), var(--_drop-shadow);

@@ -201,6 +201,7 @@ fn create_osd(services: &ShellServices) -> Option<Controller<Osd>> {
                 config: services.config.clone(),
                 audio: services.audio.clone(),
                 brightness: services.brightness.clone(),
+                battery: services.battery.clone(),
             })
             .detach(),
     )

@@ -7,6 +7,7 @@ use wayle_audio::{
     AudioService,
     core::device::{input::InputDevice, output::OutputDevice},
 };
+use wayle_battery::BatteryService;
 use wayle_brightness::{BacklightDevice, BrightnessService};
 use wayle_config::ConfigService;
 use wayle_widgets::{watch, watch_cancellable, watch_cancellable_throttled};
@@ -24,6 +25,7 @@ pub(super) fn spawn(
     config: &Arc<ConfigService>,
     audio: &Option<Arc<AudioService>>,
     brightness: &Option<Arc<BrightnessService>>,
+    battery: &Option<Arc<BatteryService>>,
 ) {
     spawn_config_watcher(sender, config);
 
@@ -35,7 +37,21 @@ pub(super) fn spawn(
         spawn_brightness_service_watcher(sender, brightness);
     }
 
+    if let Some(battery) = battery {
+        spawn_battery_watcher(sender, battery);
+    }
+
     spawn_toggle_watchers(sender);
+}
+
+fn spawn_battery_watcher(sender: &ComponentSender<Osd>, battery: &Arc<BatteryService>) {
+    let device = battery.device.clone();
+    let state = device.state.clone();
+    let percentage = device.percentage.clone();
+
+    watch!(sender, [state.watch(), percentage.watch()], |out| {
+        let _ = out.send(OsdCmd::BatteryChanged);
+    });
 }
 
 fn spawn_config_watcher(sender: &ComponentSender<Osd>, config: &Arc<ConfigService>) {

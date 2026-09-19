@@ -4,6 +4,7 @@ use wayle_audio::{
     AudioService,
     core::device::{input::InputDevice, output::OutputDevice},
 };
+use wayle_battery::BatteryService;
 use wayle_brightness::{BacklightDevice, BrightnessService};
 use wayle_config::ConfigService;
 
@@ -11,6 +12,7 @@ pub(crate) struct OsdInit {
     pub(crate) config: Arc<ConfigService>,
     pub(crate) audio: Option<Arc<AudioService>>,
     pub(crate) brightness: Option<Arc<BrightnessService>>,
+    pub(crate) battery: Option<Arc<BatteryService>>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +42,7 @@ pub(crate) enum OsdCmd {
     InputVolumeChanged,
     BrightnessDeviceChanged(Option<Arc<BacklightDevice>>),
     BrightnessChanged,
+    BatteryChanged,
     ToggleChanged(ToggleEvent),
 }
 

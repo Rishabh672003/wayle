@@ -3,11 +3,13 @@ use std::{sync::Arc, time::Duration};
 use gtk4_layer_shell::{Edge, LayerShell};
 use relm4::{ComponentSender, gtk, gtk::prelude::*};
 use wayle_audio::core::device::{input::InputDevice, output::OutputDevice};
+use wayle_battery::types::DeviceState;
 use wayle_brightness::BacklightDevice;
 use wayle_config::schemas::osd::{OsdMonitor, OsdPosition};
 
 use super::{
-    BRIGHTNESS_ICON, Osd, messages,
+    BATTERY_CHARGING_ICON, BATTERY_CRITICAL_THRESHOLD, BATTERY_ICON, BATTERY_LOW_ICON,
+    BATTERY_LOW_OSD_DURATION_MS, BATTERY_LOW_THRESHOLD, BRIGHTNESS_ICON, Osd, messages,
     messages::{OsdCmd, OsdEvent},
     watchers,
 };
@@ -26,6 +28,18 @@ impl Osd {
         sender: &ComponentSender<Self>,
         root: &gtk::Window,
     ) {
+        let duration = self.config.config().osd.duration.get();
+        self.show_event_for(event, duration, sender, root);
+    }
+
+    /// Like `show_event` but with an explicit dismiss duration (ms).
+    pub(super) fn show_event_for(
+        &mut self,
+        event: OsdEvent,
+        duration_ms: u32,
+        sender: &ComponentSender<Self>,
+        root: &gtk::Window,
+    ) {
         if !self.ready {
             return;
         }
@@ -35,8 +49,7 @@ impl Osd {
 
         root.set_visible(true);
 
-        let duration = self.config.config().osd.duration.get();
-        Self::schedule_dismiss(sender, duration, self.dismiss_id);
+        Self::schedule_dismiss(sender, duration_ms, self.dismiss_id);
     }
 
     pub(super) fn handle_device_changed(
@@ -131,6 +144,119 @@ impl Osd {
         };
 
         self.show_event(event, sender, root);
+    }
+
+    pub(super) fn handle_battery_changed(
+        &mut self,
+        sender: &ComponentSender<Self>,
+        root: &gtk::Window,
+    ) {
+        let Some(battery) = &self.battery else {
+            return;
+        };
+
+        if !self.config.config().osd.battery.get() {
+            return;
+        }
+
+        let device = &battery.device;
+        let state = device.state.get();
+        let percentage = device.percentage.get();
+
+        let previous_state = self.last_battery_state.replace(state);
+        let discharging = matches!(
+            state,
+            DeviceState::Discharging | DeviceState::PendingDischarge
+        );
+        let charging =
+            matches!(state, DeviceState::Charging | DeviceState::FullyCharged);
+
+        // Reset the low latch once charging or recovered above threshold.
+        if charging || percentage > BATTERY_LOW_THRESHOLD {
+            self.battery_low_shown = false;
+        }
+
+        // Release the sticky critical OSD once charging (or recovered).
+        if charging || percentage > BATTERY_CRITICAL_THRESHOLD {
+            self.battery_critical_event = None;
+        }
+
+        // Skip the first reading so we don't pop up on startup.
+        let Some(previous_state) = previous_state else {
+            return;
+        };
+
+        // State transitions take priority (transient popups).
+        if state != previous_state {
+            let transition = match state {
+                DeviceState::Charging | DeviceState::PendingCharge => {
+                    Some(("Charging", BATTERY_CHARGING_ICON))
+                }
+                DeviceState::Discharging | DeviceState::PendingDischarge => {
+                    Some(("On Battery", BATTERY_ICON))
+                }
+                DeviceState::FullyCharged => Some(("Fully Charged", BATTERY_CHARGING_ICON)),
+                _ => None,
+            };
+
+            if let Some((label, icon)) = transition {
+                self.show_event(
+                    Self::battery_event(label, icon, percentage),
+                    sender,
+                    root,
+                );
+                return;
+            }
+        }
+
+        if !discharging {
+            return;
+        }
+
+        // Critical: sticky, shown once and kept until charging.
+        if percentage <= BATTERY_CRITICAL_THRESHOLD && self.battery_critical_event.is_none() {
+            self.battery_low_shown = true;
+            let event = Self::battery_event("Critical Battery", BATTERY_LOW_ICON, percentage);
+            self.show_sticky_battery(event, root);
+            return;
+        }
+
+        // Low: transient, shown once per drain below the threshold.
+        if percentage <= BATTERY_LOW_THRESHOLD
+            && !self.battery_low_shown
+            && self.battery_critical_event.is_none()
+        {
+            self.battery_low_shown = true;
+            self.show_event_for(
+                Self::battery_event("Low Battery", BATTERY_LOW_ICON, percentage),
+                BATTERY_LOW_OSD_DURATION_MS,
+                sender,
+                root,
+            );
+        }
+    }
+
+    fn battery_event(label: &str, icon: &str, percentage: f64) -> OsdEvent {
+        OsdEvent::Slider {
+            label: label.to_string(),
+            icon: icon.to_string(),
+            percentage,
+            muted: false,
+        }
+    }
+
+    /// Shows an OSD that stays up (no auto-dismiss). It is re-asserted after
+    /// any transient OSD dismisses, and cleared in `handle_battery_changed`.
+    fn show_sticky_battery(&mut self, event: OsdEvent, root: &gtk::Window) {
+        // Not ready yet: don't latch, so the next battery tick retries.
+        if !self.ready {
+            return;
+        }
+
+        self.battery_critical_event = Some(event.clone());
+        self.current_event = Some(event);
+        self.dismiss_id = self.dismiss_id.wrapping_add(1);
+        root.set_visible(true);
     }
 
     pub(super) fn handle_input_device_changed(

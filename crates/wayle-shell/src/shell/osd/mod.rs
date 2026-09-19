@@ -10,6 +10,7 @@ use gtk4_layer_shell::{KeyboardMode, LayerShell};
 use relm4::{gtk, prelude::*};
 use tracing::debug;
 use wayle_audio::AudioService;
+use wayle_battery::{BatteryService, types::DeviceState};
 use wayle_brightness::BrightnessService;
 use wayle_config::ConfigService;
 use wayle_widgets::WatcherToken;
@@ -24,11 +25,26 @@ use self::{
 };
 
 const BRIGHTNESS_ICON: &str = "ld-sun-symbolic";
+const BATTERY_ICON: &str = "md-battery_android_frame_full-symbolic";
+const BATTERY_CHARGING_ICON: &str = "md-battery_android_frame_bolt-symbolic";
+const BATTERY_LOW_ICON: &str = "md-battery_android_alert-symbolic";
+
+/// Battery percentage at or below which a low-battery OSD is shown (transient).
+const BATTERY_LOW_THRESHOLD: f64 = 20.0;
+
+/// How long the transient low-battery OSD stays up. Longer than the shared
+/// `osd.duration` (used for volume/brightness) since it's an alert, not feedback.
+const BATTERY_LOW_OSD_DURATION_MS: u32 = 10000;
+
+/// Battery percentage at or below which a critical OSD is shown. Unlike the
+/// low one it is sticky: it stays until the battery starts charging.
+const BATTERY_CRITICAL_THRESHOLD: f64 = 5.0;
 
 pub(crate) struct Osd {
     config: Arc<ConfigService>,
     audio: Option<Arc<AudioService>>,
     brightness: Option<Arc<BrightnessService>>,
+    battery: Option<Arc<BatteryService>>,
     dismiss_id: u32,
     ready: bool,
     device_watcher: WatcherToken,
@@ -39,6 +55,11 @@ pub(crate) struct Osd {
     last_volume: Option<(u32, bool)>,
     last_input_volume: Option<(u32, bool)>,
     last_brightness: Option<u32>,
+    last_battery_state: Option<DeviceState>,
+    battery_low_shown: bool,
+    /// While set, the critical-battery OSD is kept on screen (and re-shown if
+    /// another OSD transiently replaces it) until the battery starts charging.
+    battery_critical_event: Option<OsdEvent>,
 }
 
 #[allow(clippy::needless_borrow)]
@@ -155,6 +176,7 @@ impl Component for Osd {
             config: init.config.clone(),
             audio: init.audio.clone(),
             brightness: init.brightness.clone(),
+            battery: init.battery.clone(),
             dismiss_id: 0,
             ready: false,
             device_watcher: WatcherToken::new(),
@@ -164,6 +186,9 @@ impl Component for Osd {
             last_volume: None,
             last_input_volume: None,
             last_brightness: None,
+            last_battery_state: None,
+            battery_low_shown: false,
+            battery_critical_event: None,
         };
 
         model.apply_position(&root);
@@ -176,7 +201,13 @@ impl Component for Osd {
 
         let widgets = view_output!();
 
-        watchers::spawn(&sender, &init.config, &init.audio, &init.brightness);
+        watchers::spawn(
+            &sender,
+            &init.config,
+            &init.audio,
+            &init.brightness,
+            &init.battery,
+        );
 
         ComponentParts { model, widgets }
     }
@@ -189,8 +220,15 @@ impl Component for Osd {
 
             OsdCmd::Dismiss(dismiss_id) => {
                 if dismiss_id == self.dismiss_id {
-                    root.set_visible(false);
-                    debug!("OSD dismissed");
+                    // A sticky critical-battery OSD outlives transient ones:
+                    // fall back to it instead of hiding.
+                    if let Some(event) = self.battery_critical_event.clone() {
+                        self.current_event = Some(event);
+                        root.set_visible(true);
+                    } else {
+                        root.set_visible(false);
+                        debug!("OSD dismissed");
+                    }
                 }
             }
 
@@ -213,6 +251,10 @@ impl Component for Osd {
 
             OsdCmd::BrightnessChanged => {
                 self.handle_brightness_changed(&sender, root);
+            }
+
+            OsdCmd::BatteryChanged => {
+                self.handle_battery_changed(&sender, root);
             }
 
             OsdCmd::InputDeviceChanged(device) => {
