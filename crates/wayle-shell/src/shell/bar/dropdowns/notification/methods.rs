@@ -2,9 +2,35 @@ use super::{
     NotificationDropdown,
     helpers::{NotificationGroupData, group_by_app},
     notification_group::messages::{NotificationGroupInit, NotificationGroupInput},
+    notification_item::messages::NotificationItemInit,
 };
+use crate::shell::notification_popup::helpers::resolve_icon;
 
 impl NotificationDropdown {
+    /// Rebuilds the flat history list from the shared history property.
+    pub(super) fn rebuild_history_items(&mut self) {
+        let history = self.history.get();
+        let icon_source = self.config.config().modules.notifications.icon_source.get();
+
+        let mut guard = self.history_items.guard();
+        guard.clear();
+
+        for notification in &history {
+            let resolved_icon = resolve_icon(
+                icon_source,
+                &notification.app_name.get(),
+                &notification.app_icon.get(),
+                &notification.image_path.get(),
+                &notification.desktop_entry.get(),
+            );
+
+            guard.push_back(NotificationItemInit {
+                notification: notification.clone(),
+                resolved_icon,
+            });
+        }
+    }
+
     pub(super) fn rebuild_groups(&mut self) {
         let notifications = self.notification.notifications.get();
         self.has_notifications = !notifications.is_empty();

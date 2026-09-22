@@ -2,7 +2,8 @@ use std::{sync::Arc, time::Duration};
 
 use relm4::ComponentSender;
 use wayle_config::ConfigService;
-use wayle_notification::NotificationService;
+use wayle_core::Property;
+use wayle_notification::{NotificationService, core::notification::Notification};
 use wayle_widgets::watch;
 
 use super::{NotificationDropdown, messages::NotificationDropdownCmd};
@@ -19,6 +20,17 @@ pub(super) fn spawn(
     spawn_scale_watcher(sender, config);
     spawn_icon_source_watcher(sender, config);
     spawn_relative_time_refresh(sender);
+}
+
+pub(super) fn spawn_history(
+    sender: &ComponentSender<NotificationDropdown>,
+    history: &Property<Vec<Arc<Notification>>>,
+) {
+    let history = history.clone();
+
+    watch!(sender, [history.watch()], |out| {
+        let _ = out.send(NotificationDropdownCmd::HistoryChanged);
+    });
 }
 
 fn spawn_relative_time_refresh(sender: &ComponentSender<NotificationDropdown>) {

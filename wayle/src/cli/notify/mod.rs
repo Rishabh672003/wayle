@@ -6,6 +6,8 @@ pub mod dismiss;
 pub mod dismiss_all;
 /// Do Not Disturb toggle command
 pub mod dnd;
+/// Notification history command
+pub mod history;
 /// List notifications command
 pub mod list;
 mod proxy;
@@ -23,6 +25,7 @@ use super::CliAction;
 pub async fn execute(command: NotifyCommands) -> CliAction {
     match command {
         NotifyCommands::List => list::execute().await,
+        NotifyCommands::History { count } => history::execute(count).await,
         NotifyCommands::Dismiss { id } => dismiss::execute(id).await,
         NotifyCommands::DismissAll => dismiss_all::execute().await,
         NotifyCommands::Dnd => dnd::execute().await,

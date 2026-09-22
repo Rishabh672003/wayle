@@ -4,6 +4,7 @@ notification-dropdown-title = Notifications
 notification-dropdown-empty-title = All Caught Up
 notification-dropdown-empty-description = No new notifications
 notification-dropdown-clear-all = Clear All
+notification-dropdown-history = History
 notification-dropdown-dnd-label = Do Not Disturb
 notification-dropdown-group-clear = Clear
 notification-dropdown-group-more = { $count } more

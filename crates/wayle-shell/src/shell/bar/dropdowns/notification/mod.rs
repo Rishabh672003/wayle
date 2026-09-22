@@ -11,7 +11,8 @@ use std::sync::Arc;
 use gtk::prelude::*;
 use relm4::{gtk, prelude::*};
 use wayle_config::ConfigService;
-use wayle_notification::NotificationService;
+use wayle_core::Property;
+use wayle_notification::{NotificationService, core::notification::Notification};
 use wayle_widgets::prelude::*;
 
 pub(super) use self::factory::Factory;
@@ -21,6 +22,7 @@ use self::{
         NotificationGroup,
         messages::{NotificationGroupInput, NotificationGroupOutput},
     },
+    notification_item::{NotificationItem, messages::NotificationItemOutput},
 };
 use crate::{i18n::t, shell::bar::dropdowns::scaled_dimension};
 
@@ -36,8 +38,12 @@ pub(crate) struct NotificationDropdown {
 
     dnd: bool,
     has_notifications: bool,
+    showing_history: bool,
+
+    history: Property<Vec<Arc<Notification>>>,
 
     groups: FactoryVecDeque<NotificationGroup>,
+    history_items: FactoryVecDeque<NotificationItem>,
 }
 
 #[relm4::component(pub(crate))]
@@ -85,13 +91,28 @@ impl Component for NotificationDropdown {
                         GhostButton {
                             add_css_class: "notification-dropdown-clear-all",
                             #[watch]
-                            set_visible: model.has_notifications,
+                            set_visible: model.has_notifications && !model.showing_history,
                             connect_clicked[sender] => move |_| {
                                 sender.input(NotificationDropdownMsg::ClearAll);
                             },
                             #[template_child]
                             label {
                                 set_label: &t!("notification-dropdown-clear-all"),
+                            },
+                        },
+
+                        #[template]
+                        GhostIconButton {
+                            add_css_class: "notification-dropdown-history-toggle",
+                            #[watch]
+                            set_icon_name: if model.showing_history {
+                                "ld-bell-symbolic"
+                            } else {
+                                "ld-clock-symbolic"
+                            },
+                            set_tooltip_text: Some(&t!("notification-dropdown-history")),
+                            connect_clicked[sender] => move |_| {
+                                sender.input(NotificationDropdownMsg::ToggleHistory);
                             },
                         },
                     },
@@ -127,7 +148,7 @@ impl Component for NotificationDropdown {
                     #[template]
                     EmptyState {
                         #[watch]
-                        set_visible: !model.has_notifications,
+                        set_visible: !model.showing_history && !model.has_notifications,
                         #[template_child]
                         icon {
                             #[watch]
@@ -154,10 +175,24 @@ impl Component for NotificationDropdown {
                         set_vexpand: true,
                         set_hscrollbar_policy: gtk::PolicyType::Never,
                         #[watch]
-                        set_visible: model.has_notifications,
+                        set_visible: !model.showing_history && model.has_notifications,
 
                         #[local_ref]
                         groups_widget -> gtk::Box {
+                            add_css_class: "notification-dropdown-groups",
+                            set_orientation: gtk::Orientation::Vertical,
+                        },
+                    },
+
+                    gtk::ScrolledWindow {
+                        add_css_class: "notification-dropdown-scroll",
+                        set_vexpand: true,
+                        set_hscrollbar_policy: gtk::PolicyType::Never,
+                        #[watch]
+                        set_visible: model.showing_history,
+
+                        #[local_ref]
+                        history_widget -> gtk::Box {
                             add_css_class: "notification-dropdown-groups",
                             set_orientation: gtk::Orientation::Vertical,
                         },
@@ -183,6 +218,14 @@ impl Component for NotificationDropdown {
                 }
             });
 
+        let history_items = FactoryVecDeque::builder()
+            .launch(gtk::Box::default())
+            .forward(sender.input_sender(), |item_output| match item_output {
+                NotificationItemOutput::Dismissed(id) => {
+                    NotificationDropdownMsg::HistoryItemDismissed(id)
+                }
+            });
+
         let mut model = Self {
             notification: init.notification.clone(),
             config: init.config.clone(),
@@ -190,14 +233,19 @@ impl Component for NotificationDropdown {
             scaled_height: scaled_dimension(BASE_HEIGHT, scale),
             dnd,
             has_notifications: false,
+            showing_history: false,
+            history: init.history.clone(),
             groups,
+            history_items,
         };
 
         model.rebuild_groups();
 
         watchers::spawn(&sender, &init.notification, &init.config);
+        watchers::spawn_history(&sender, &init.history);
 
         let groups_widget = model.groups.widget();
+        let history_widget = model.history_items.widget();
         let widgets = view_output!();
 
         ComponentParts { model, widgets }
@@ -217,6 +265,19 @@ impl Component for NotificationDropdown {
             }
 
             NotificationDropdownMsg::NotificationDismissed => {}
+
+            NotificationDropdownMsg::ToggleHistory => {
+                self.showing_history = !self.showing_history;
+                if self.showing_history {
+                    self.rebuild_history_items();
+                }
+            }
+
+            NotificationDropdownMsg::HistoryItemDismissed(id) => {
+                let mut list = self.history.get();
+                list.retain(|notif| notif.id != id);
+                self.history.set(list);
+            }
         }
     }
 
@@ -247,6 +308,12 @@ impl Component for NotificationDropdown {
             NotificationDropdownCmd::TimeTick => {
                 for idx in 0..self.groups.len() {
                     self.groups.send(idx, NotificationGroupInput::RefreshTime);
+                }
+            }
+
+            NotificationDropdownCmd::HistoryChanged => {
+                if self.showing_history {
+                    self.rebuild_history_items();
                 }
             }
         }

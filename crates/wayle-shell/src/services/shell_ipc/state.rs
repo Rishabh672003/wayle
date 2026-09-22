@@ -1,8 +1,9 @@
 //! Reactive state for shell IPC.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use wayle_core::Property;
+use wayle_notification::core::notification::Notification;
 
 /// Shared reactive state exposed to shell components via `ShellIpcService`.
 ///
@@ -15,6 +16,10 @@ pub struct ShellIpcState {
     /// All active monitor connectors. Updated by the shell when bars are
     /// created or destroyed.
     pub connectors: Property<Vec<String>>,
+
+    /// Notifications that left the active list (dismissed or expired),
+    /// newest first, capped in length. In-memory only, like dunst history.
+    pub notification_history: Property<Vec<Arc<Notification>>>,
 }
 
 impl ShellIpcState {
@@ -22,6 +27,7 @@ impl ShellIpcState {
         Self {
             hidden_bars: Property::new(HashSet::new()),
             connectors: Property::new(Vec::new()),
+            notification_history: Property::new(Vec::new()),
         }
     }
 }

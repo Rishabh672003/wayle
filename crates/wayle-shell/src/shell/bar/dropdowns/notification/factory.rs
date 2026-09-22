@@ -16,10 +16,12 @@ impl DropdownFactory for Factory {
             services.notification.clone(),
         )?;
         let config = services.config.clone();
+        let history = services.shell_ipc.state().notification_history;
 
         let init = NotificationDropdownInit {
             notification,
             config,
+            history,
         };
         let controller = NotificationDropdown::builder().launch(init).detach();
 
