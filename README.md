@@ -20,6 +20,8 @@ Configure it in `config.toml`, through the `wayle-settings` GUI, or with the `wa
 > **Added in this fork:**
 > - **Notification history** — a history toggle in the notification dropdown, persisted to disk (`$XDG_STATE_HOME/wayle/notification-history.jsonl`) so it survives shell restarts, queryable with `wayle notify history -n <count>`.
 > - **Live system tray tooltips** — hover tooltips built from each item's `ToolTip` property that refresh live (e.g. torrent up/down speeds) instead of freezing on the first read.
+> - **Battery OSD popups** — on-screen popups for battery events (plugged in, unplugged, low battery).
+> - **Media player improvements** — the active player auto-switches to whichever starts playing, and short track/source names are no longer truncated in the media source picker.
 
 <p align="center">
   <img src="assets/wayle-preview.png" alt="Wayle desktop shell">
