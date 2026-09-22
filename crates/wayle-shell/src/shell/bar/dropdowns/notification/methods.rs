@@ -10,6 +10,7 @@ impl NotificationDropdown {
     /// Rebuilds the flat history list from the shared history property.
     pub(super) fn rebuild_history_items(&mut self) {
         let history = self.history.get();
+        self.has_history = !history.is_empty();
         let icon_source = self.config.config().modules.notifications.icon_source.get();
 
         let mut guard = self.history_items.guard();

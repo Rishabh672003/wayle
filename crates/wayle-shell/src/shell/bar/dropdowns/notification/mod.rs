@@ -38,6 +38,7 @@ pub(crate) struct NotificationDropdown {
 
     dnd: bool,
     has_notifications: bool,
+    has_history: bool,
     showing_history: bool,
 
     history: Property<Vec<Arc<Notification>>>,
@@ -184,12 +185,30 @@ impl Component for NotificationDropdown {
                         },
                     },
 
+                    #[template]
+                    EmptyState {
+                        #[watch]
+                        set_visible: model.showing_history && !model.has_history,
+                        #[template_child]
+                        icon {
+                            set_icon_name: Some("ld-clock-symbolic"),
+                        },
+                        #[template_child]
+                        title {
+                            set_label: &t!("notification-dropdown-history-empty-title"),
+                        },
+                        #[template_child]
+                        description {
+                            set_label: &t!("notification-dropdown-history-empty-description"),
+                        },
+                    },
+
                     gtk::ScrolledWindow {
                         add_css_class: "notification-dropdown-scroll",
                         set_vexpand: true,
                         set_hscrollbar_policy: gtk::PolicyType::Never,
                         #[watch]
-                        set_visible: model.showing_history,
+                        set_visible: model.showing_history && model.has_history,
 
                         #[local_ref]
                         history_widget -> gtk::Box {
@@ -233,6 +252,7 @@ impl Component for NotificationDropdown {
             scaled_height: scaled_dimension(BASE_HEIGHT, scale),
             dnd,
             has_notifications: false,
+            has_history: false,
             showing_history: false,
             history: init.history.clone(),
             groups,
