@@ -10,6 +10,7 @@ use relm4::{
 use tracing::debug;
 use wayle_systray::{
     adapters::gtk4::{Adapter, TrayMenuModel},
+    core::item::TrayItem,
     types::Coordinates,
 };
 
@@ -290,6 +291,24 @@ impl SystrayItem {
 /// left margin for check/radio indicators via a shared size group, even on
 /// items that don't have one. This walks the popover tree and undoes both:
 /// icons with content get forced visible, and empty indicator boxes get hidden.
+/// Builds the hover-tooltip text from an item's `ToolTip` (title +
+/// description), falling back to the item title. Empty means no tooltip.
+pub(super) fn tooltip_text(item: &TrayItem) -> String {
+    let tooltip = item.tooltip.get();
+    let title = if tooltip.title.is_empty() {
+        item.title.get()
+    } else {
+        tooltip.title
+    };
+
+    match (title.is_empty(), tooltip.description.is_empty()) {
+        (false, false) => format!("{title}\n{}", tooltip.description),
+        (false, true) => title,
+        (true, false) => tooltip.description,
+        (true, true) => String::new(),
+    }
+}
+
 fn override_model_button_layout(widget: &gtk::Widget) {
     if widget.css_name() == "modelbutton" {
         force_icon_visible(widget);

@@ -50,6 +50,7 @@ pub(super) enum SystrayItemMsg {
     ShowMenu,
     MenuUpdated,
     IconUpdated,
+    TooltipUpdated,
 }
 
 #[derive(Debug)]
@@ -136,8 +137,27 @@ impl FactoryComponent for SystrayItem {
         root.add_controller(right_click);
         root.add_controller(middle_click);
 
+        // Custom non-wrapping tooltip so the box sizes to its content: short
+        // names stay small, and multi-line stats keep each value on one line.
+        root.set_has_tooltip(true);
+        root.connect_query_tooltip({
+            let item = self.item.clone();
+            move |_widget, _x, _y, _keyboard, tooltip| {
+                let text = methods::tooltip_text(&item);
+                if text.is_empty() {
+                    return false;
+                }
+                let label = gtk::Label::new(Some(&text));
+                label.set_wrap(false);
+                tooltip.set_custom(Some(&label));
+                true
+            }
+        });
+
         watchers::spawn_menu_watcher(&sender, &self.item, self.cancel_token.clone());
         watchers::spawn_icon_watcher(&sender, &self.item, self.cancel_token.clone());
+        watchers::spawn_tooltip_watcher(&sender, &self.item, self.cancel_token.clone());
+        watchers::spawn_tooltip_refresher(&self.item, self.cancel_token.clone());
 
         let widgets = view_output!();
 
@@ -194,6 +214,14 @@ impl FactoryComponent for SystrayItem {
             SystrayItemMsg::IconUpdated => {
                 if let Some(icon) = self.icon.clone() {
                     self.update_icon(&icon);
+                }
+            }
+            SystrayItemMsg::TooltipUpdated => {
+                // Force GTK to re-run query-tooltip so a currently-visible
+                // tooltip refreshes; otherwise it stays on the first read
+                // until the pointer leaves and re-enters.
+                if let Some(button) = self.button.as_ref() {
+                    button.trigger_tooltip_query();
                 }
             }
         }
