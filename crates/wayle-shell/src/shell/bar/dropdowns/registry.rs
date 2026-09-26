@@ -3,6 +3,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
+    sync::Arc,
 };
 
 use gtk::prelude::*;
@@ -10,6 +11,7 @@ use gtk4_layer_shell::{KeyboardMode, LayerShell};
 use relm4::{gtk, prelude::*};
 use tracing::{debug, warn};
 use wayle_config::{ClickAction, schemas::bar::Location};
+use wayle_hyprland::HyprlandService;
 use wayle_widgets::prelude::{BarButton, BarButtonInput};
 
 use crate::{process, shell::services::ShellServices};
@@ -410,6 +412,7 @@ impl DropdownRegistry {
             );
             return None;
         };
+        refocus_pointer_on_close(&raw.popover, self.services.hyprland.clone());
         let instance = Rc::new(raw);
         cache.insert(name.to_owned(), instance.clone());
         debug!(dropdown = name, "dropdown cached");
@@ -488,6 +491,44 @@ fn install_hover_sync_cleanup(target: &gtk::Widget) {
         }
     });
     target.add_controller(motion);
+}
+
+/// Makes Hyprland re-evaluate pointer focus after a dropdown closes.
+///
+/// Autohide popovers hold an xdg_popup grab, which moves pointer focus onto the
+/// popup surface. When the popup is destroyed Hyprland leaves focus there until
+/// the pointer moves, so clicks on the (unmoved) button go to the dead popup and
+/// are dropped. Warping the cursor onto its own position makes Hyprland refocus
+/// the surface under it without visibly moving anything.
+///
+/// See `HYPRLAND_POPUP_FOCUS.md` in this directory for the protocol trace and
+/// when this can be removed.
+fn refocus_pointer_on_close(popover: &gtk::Popover, hyprland: Option<Arc<HyprlandService>>) {
+    let Some(hyprland) = hyprland else {
+        return;
+    };
+    popover.connect_closed(move |_| {
+        let hyprland = hyprland.clone();
+        tokio::spawn(async move {
+            // Let Hyprland process the popup destroy first, or it refocuses the popup.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let Ok(pos) = hyprland.cursor_pos().await else {
+                return;
+            };
+            // Hyprland >= 0.56 takes Lua dispatchers; older versions the legacy form.
+            let lua = format!("hl.dsp.cursor.move({{ x = {}, y = {} }})", pos.x, pos.y);
+            if hyprland
+                .dispatch(&lua)
+                .await
+                .is_ok_and(|reply| reply.trim() == "ok")
+            {
+                return;
+            }
+            let _ = hyprland
+                .dispatch(&format!("movecursor {} {}", pos.x, pos.y))
+                .await;
+        });
+    });
 }
 
 fn set_bar_keyboard_mode(popover: &gtk::Popover, mode: KeyboardMode) {
