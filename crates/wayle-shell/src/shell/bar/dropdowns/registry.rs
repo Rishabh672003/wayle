@@ -14,6 +14,11 @@ use wayle_widgets::prelude::{BarButton, BarButtonInput};
 
 use crate::{process, shell::services::ShellServices};
 
+/// CSS class mirroring `:hover`, applied to an anchor when its dropdown closes
+/// while the pointer is still over it (GTK doesn't restore `:hover` after the
+/// popover grab ends). Removed on the next real leave.
+const HOVER_SYNC_CLASS: &str = "hover-sync";
+
 /// Returns `value` unchanged, logging at debug if it is `None`.
 ///
 /// Use inside dropdown factories that gate on a service dependency: instead of
@@ -80,6 +85,15 @@ impl DropdownInstance {
             }
 
             set_bar_keyboard_mode(popover, KeyboardMode::None);
+
+            // Re-assert the anchor's hover look: closing here means the button
+            // was just clicked, so the pointer is over it, but GTK drops its
+            // `:hover` under the popover grab and won't restore it until the
+            // pointer moves. `install_hover_sync_cleanup` clears the class on the
+            // next real leave.
+            if let Some(parent) = popover.parent() {
+                parent.add_css_class(HOVER_SYNC_CLASS);
+            }
         });
 
         Self {
@@ -169,6 +183,7 @@ impl DropdownInstance {
             self.popover.unparent();
         }
         self.popover.set_parent(target);
+        install_hover_sync_cleanup(target);
 
         let popover = self.popover.downgrade();
         target.connect_destroy(move |destroyed| {
@@ -450,6 +465,29 @@ fn dispatch_action(
         }
         ClickAction::None => debug!("click: none"),
     }
+}
+
+/// Removes the [`HOVER_SYNC_CLASS`] from an anchor once the pointer really
+/// leaves it.
+///
+/// The class is applied when a dropdown closes (in `connect_closed`) to stand
+/// in for the `:hover` state GTK drops under the popover grab. Only a `Normal`
+/// crossing means the pointer actually moved away — grab/ungrab crossings fire
+/// while it stays put — so we clear the class solely on those. One controller
+/// per anchor is enough; the popover reparents to the same anchor across opens.
+fn install_hover_sync_cleanup(target: &gtk::Widget) {
+    let motion = gtk::EventControllerMotion::new();
+    motion.connect_leave(move |controller| {
+        let is_real = controller.current_event().is_some_and(|event| {
+            event
+                .downcast::<gtk::gdk::CrossingEvent>()
+                .is_ok_and(|crossing| crossing.mode() == gtk::gdk::CrossingMode::Normal)
+        });
+        if is_real && let Some(widget) = controller.widget() {
+            widget.remove_css_class(HOVER_SYNC_CLASS);
+        }
+    });
+    target.add_controller(motion);
 }
 
 fn set_bar_keyboard_mode(popover: &gtk::Popover, mode: KeyboardMode) {

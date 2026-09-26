@@ -17,7 +17,8 @@ menubutton.bar-button {
         border-radius: var(--bar-button-rounding-element);
     }
 
-    &:hover > button.toggle {
+    &:hover > button.toggle,
+    &.hover-sync > button.toggle {
         filter: brightness(1.15);
     }
 

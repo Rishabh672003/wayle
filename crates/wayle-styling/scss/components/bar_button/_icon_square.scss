@@ -53,7 +53,8 @@ menubutton.bar-button.icon-square {
         margin-bottom: 0;
     }
 
-    > button.toggle:hover .icon-container {
+    > button.toggle:hover .icon-container,
+    &.hover-sync > button.toggle .icon-container {
         filter: brightness(1.2);
     }
 }
