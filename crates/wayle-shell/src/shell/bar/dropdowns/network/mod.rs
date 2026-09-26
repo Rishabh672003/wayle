@@ -24,7 +24,7 @@ use self::{
 };
 use crate::{i18n::t, shell::bar::dropdowns::scaled_dimension};
 
-const BASE_WIDTH: f32 = 382.0;
+const BASE_WIDTH: f32 = 440.0;
 const BASE_HEIGHT: f32 = 512.0;
 
 pub(crate) struct NetworkDropdown {
