@@ -84,7 +84,12 @@ impl Component for NotificationDropdown {
                     },
                     #[template_child]
                     label {
-                        set_label: &t!("notification-dropdown-title"),
+                        #[watch]
+                        set_label: &if model.showing_history {
+                            t!("notification-dropdown-history")
+                        } else {
+                            t!("notification-dropdown-title")
+                        },
                     },
                     #[template_child]
                     actions {
@@ -111,7 +116,12 @@ impl Component for NotificationDropdown {
                             } else {
                                 "ld-clock-symbolic"
                             },
-                            set_tooltip_text: Some(&t!("notification-dropdown-history")),
+                            #[watch]
+                            set_tooltip_text: Some(&if model.showing_history {
+                                t!("notification-dropdown-title")
+                            } else {
+                                t!("notification-dropdown-history")
+                            }),
                             connect_clicked[sender] => move |_| {
                                 sender.input(NotificationDropdownMsg::ToggleHistory);
                             },
