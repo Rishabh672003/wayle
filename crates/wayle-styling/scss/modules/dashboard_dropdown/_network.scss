@@ -28,11 +28,11 @@
 
     .speed-stat {
         &.up image.speed-arrow {
-            color: var(--status-success);
+            color: var(--status-info);
         }
 
         &.down image.speed-arrow {
-            color: var(--status-info);
+            color: var(--status-success);
         }
 
         &.muted image.speed-arrow {

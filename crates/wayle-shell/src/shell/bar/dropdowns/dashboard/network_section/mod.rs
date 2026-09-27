@@ -72,43 +72,6 @@ impl Component for NetworkSection {
             gtk::Box {
                 add_css_class: "network-speeds",
 
-                #[name = "upload_stat"]
-                gtk::Box {
-                    #[watch]
-                    set_css_classes: if model.connected {
-                        &["speed-stat", "up"]
-                    } else {
-                        &["speed-stat", "muted"]
-                    },
-                    set_orientation: gtk::Orientation::Vertical,
-                    set_hexpand: true,
-
-                    gtk::Image {
-                        add_css_class: "speed-arrow",
-                        set_icon_name: Some("ld-arrow-up-symbolic"),
-                    },
-
-                    #[name = "upload_value"]
-                    gtk::Label {
-                        add_css_class: "speed-value",
-                        #[watch]
-                        set_class_active: ("muted", !model.connected),
-                        #[watch]
-                        set_label: if model.connected {
-                            &model.upload
-                        } else {
-                            "--"
-                        },
-                    },
-
-                    #[name = "upload_unit"]
-                    gtk::Label {
-                        add_css_class: "speed-unit",
-                        #[watch]
-                        set_label: &Self::speed_unit_label(model.upload_is_megabytes),
-                    },
-                },
-
                 #[name = "download_stat"]
                 gtk::Box {
                     #[watch]
@@ -143,6 +106,43 @@ impl Component for NetworkSection {
                         add_css_class: "speed-unit",
                         #[watch]
                         set_label: &Self::speed_unit_label(model.download_is_megabytes),
+                    },
+                },
+
+                #[name = "upload_stat"]
+                gtk::Box {
+                    #[watch]
+                    set_css_classes: if model.connected {
+                        &["speed-stat", "up"]
+                    } else {
+                        &["speed-stat", "muted"]
+                    },
+                    set_orientation: gtk::Orientation::Vertical,
+                    set_hexpand: true,
+
+                    gtk::Image {
+                        add_css_class: "speed-arrow",
+                        set_icon_name: Some("ld-arrow-up-symbolic"),
+                    },
+
+                    #[name = "upload_value"]
+                    gtk::Label {
+                        add_css_class: "speed-value",
+                        #[watch]
+                        set_class_active: ("muted", !model.connected),
+                        #[watch]
+                        set_label: if model.connected {
+                            &model.upload
+                        } else {
+                            "--"
+                        },
+                    },
+
+                    #[name = "upload_unit"]
+                    gtk::Label {
+                        add_css_class: "speed-unit",
+                        #[watch]
+                        set_label: &Self::speed_unit_label(model.upload_is_megabytes),
                     },
                 },
             },
