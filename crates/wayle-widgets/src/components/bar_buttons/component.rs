@@ -207,6 +207,18 @@ impl Component for BarButton {
                 .reorder_child_after(&widgets.icon_container, Some(&widgets.label_container));
         }
 
+        // GTK's default tooltip label wraps, and with fractional font sizes it
+        // rounds its width short and breaks short text onto two lines.
+        let tooltip_label = gtk::Label::new(None);
+        root.connect_query_tooltip(move |widget, _, _, _, tooltip| {
+            let Some(text) = widget.tooltip_text() else {
+                return false;
+            };
+            tooltip_label.set_text(&text);
+            tooltip.set_custom(Some(&tooltip_label));
+            true
+        });
+
         setup_event_controllers(&root, sender.output_sender().clone(), scroll_sensitivity);
         spawn_variant_watcher(&model.settings.variant, &sender);
         spawn_icon_position_watcher(&model.settings.icon_position, &sender);
