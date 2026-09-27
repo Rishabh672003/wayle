@@ -10,9 +10,12 @@ mod notification;
 mod registry;
 mod weather;
 
-pub(crate) use self::registry::{
-    DropdownFactory, DropdownInstance, DropdownRegistry, dispatch_click, dispatch_click_widget,
-    require_service,
+pub(crate) use self::{
+    battery::format_time_remaining,
+    registry::{
+        DropdownFactory, DropdownInstance, DropdownRegistry, dispatch_click, dispatch_click_widget,
+        require_service,
+    },
 };
 use crate::shell::services::ShellServices;
 

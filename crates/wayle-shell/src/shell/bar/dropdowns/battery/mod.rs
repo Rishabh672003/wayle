@@ -8,6 +8,7 @@ use gtk::prelude::*;
 use relm4::{gtk, prelude::*};
 use wayle_widgets::prelude::*;
 
+pub(crate) use self::battery_section::format_time_remaining;
 pub(super) use self::factory::Factory;
 use self::{
     battery_section::{BatterySection, BatterySectionInit},

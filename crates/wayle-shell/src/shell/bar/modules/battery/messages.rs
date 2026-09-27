@@ -26,6 +26,7 @@ pub(crate) enum BatteryMsg {
 #[allow(clippy::enum_variant_names)]
 pub(crate) enum BatteryCmd {
     UpdateLabel(String),
+    UpdateTooltip(Option<String>),
     UpdateIcon(String),
     UpdateThresholdColors(ThresholdColors),
 }

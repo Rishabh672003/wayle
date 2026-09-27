@@ -1,5 +1,7 @@
 use wayle_battery::types::WarningLevel;
 
+use crate::i18n::t;
+
 pub(super) struct TimeParts {
     pub hours: i64,
     pub minutes: i64,
@@ -13,6 +15,30 @@ pub(super) fn time_parts(seconds: i64) -> Option<TimeParts> {
     Some(TimeParts {
         hours: seconds / 3600,
         minutes: (seconds % 3600) / 60,
+    })
+}
+
+/// Formats seconds as "3h 24m remaining" / "18m until full"; `None` when unknown.
+pub(crate) fn format_time_remaining(seconds: i64, charging: bool) -> Option<String> {
+    let parts = time_parts(seconds)?;
+
+    let duration = if parts.hours > 0 {
+        t!(
+            "dropdown-battery-duration-hm",
+            hours = parts.hours.to_string(),
+            minutes = format!("{:02}", parts.minutes)
+        )
+    } else {
+        t!(
+            "dropdown-battery-duration-m",
+            minutes = parts.minutes.to_string()
+        )
+    };
+
+    Some(if charging {
+        t!("dropdown-battery-time-until-full", duration = duration)
+    } else {
+        t!("dropdown-battery-time-remaining", duration = duration)
     })
 }
 

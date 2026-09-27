@@ -117,6 +117,9 @@ impl Component for BatteryModule {
             BatteryCmd::UpdateLabel(label) => {
                 self.bar_button.emit(BarButtonInput::SetLabel(label));
             }
+            BatteryCmd::UpdateTooltip(tooltip) => {
+                self.bar_button.emit(BarButtonInput::SetTooltip(tooltip));
+            }
             BatteryCmd::UpdateIcon(icon) => {
                 self.bar_button.emit(BarButtonInput::SetIcon(icon));
             }

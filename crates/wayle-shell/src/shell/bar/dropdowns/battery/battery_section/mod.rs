@@ -13,8 +13,8 @@ use wayle_battery::{
 };
 use wayle_widgets::prelude::*;
 
-pub(crate) use self::messages::BatterySectionInit;
 use self::messages::{BatterySectionCmd, BatterySectionInput};
+pub(crate) use self::{helpers::format_time_remaining, messages::BatterySectionInit};
 use crate::i18n::t;
 
 pub(crate) struct BatterySection {

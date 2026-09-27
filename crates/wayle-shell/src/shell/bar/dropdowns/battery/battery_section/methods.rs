@@ -70,28 +70,7 @@ impl BatterySection {
             self.time_to_empty
         };
 
-        let Some(parts) = helpers::time_parts(seconds) else {
-            return String::new();
-        };
-
-        let duration = if parts.hours > 0 {
-            t!(
-                "dropdown-battery-duration-hm",
-                hours = parts.hours.to_string(),
-                minutes = format!("{:02}", parts.minutes)
-            )
-        } else {
-            t!(
-                "dropdown-battery-duration-m",
-                minutes = parts.minutes.to_string()
-            )
-        };
-
-        if self.is_charging() {
-            t!("dropdown-battery-time-until-full", duration = duration)
-        } else {
-            t!("dropdown-battery-time-remaining", duration = duration)
-        }
+        helpers::format_time_remaining(seconds, self.is_charging()).unwrap_or_default()
     }
 
     pub(super) fn has_time_display(&self) -> bool {
