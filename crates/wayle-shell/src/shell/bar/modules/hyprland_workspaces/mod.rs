@@ -30,7 +30,7 @@ use relm4::{factory::FactoryVecDeque, prelude::*};
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 use wayle_config::ConfigService;
-use wayle_hyprland::{Address, HyprlandService, WorkspaceId};
+use wayle_hyprland::{Address, HyprlandService};
 use wayle_widgets::{prelude::BarSettings, utils::force_window_resize};
 
 use self::{
@@ -49,9 +49,9 @@ pub(crate) struct HyprlandWorkspaces {
     hyprland: Option<Arc<HyprlandService>>,
     config: Arc<ConfigService>,
     settings: BarSettings,
-    active_workspace_id: WorkspaceId,
+    active_workspace_id: String,
     focused_monitor: Option<String>,
-    workspace_monitor_rules: HashMap<WorkspaceId, String>,
+    workspace_monitor_rules: HashMap<String, String>,
     urgent_windows: HashSet<Address>,
     blink_on: bool,
     blink_token: Option<CancellationToken>,
@@ -185,11 +185,11 @@ impl Component for HyprlandWorkspaces {
                 let has_min_workspace_count =
                     config.modules.hyprland_workspaces.min_workspace_count.get() > 0;
 
-                if !self.should_apply_active_workspace_change(id, monitor_specific) {
+                if !self.should_apply_active_workspace_change(&id, monitor_specific) {
                     return;
                 }
 
-                self.clear_urgent_windows_for_workspace(id);
+                self.clear_urgent_windows_for_workspace(&id);
                 self.stop_blink_if_no_urgent();
                 self.active_workspace_id = id;
                 self.sync_after_active_workspace_change(has_min_workspace_count);
@@ -211,7 +211,7 @@ impl Component for HyprlandWorkspaces {
                     self.settings.monitor_name.as_deref(),
                     &monitor,
                 ) {
-                    self.clear_urgent_windows_for_workspace(workspace_id);
+                    self.clear_urgent_windows_for_workspace(&workspace_id);
                     self.stop_blink_if_no_urgent();
                     self.active_workspace_id = workspace_id;
                     self.sync_after_active_workspace_change(has_min_workspace_count);

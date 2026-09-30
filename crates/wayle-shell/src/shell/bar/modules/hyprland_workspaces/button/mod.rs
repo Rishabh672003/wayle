@@ -5,11 +5,11 @@ use std::{collections::HashSet, mem, sync::Arc};
 use gtk::prelude::*;
 use relm4::{factory::FactoryComponent, prelude::*};
 use wayle_config::schemas::modules::{ActiveIndicator, DisplayMode, HyprlandWorkspacesConfig};
-use wayle_hyprland::{Address, Client, WorkspaceId};
+use wayle_hyprland::{Address, Client};
 
 use crate::shell::bar::modules::hyprland_workspaces::helpers::{
     IconContext, WorkspaceState, compute_static_css_classes, determine_workspace_state,
-    resolve_workspace_icons, workspace_id_css_class,
+    is_special_workspace, resolve_workspace_icons, workspace_id_css_class,
 };
 
 const WORKSPACE_LABEL_CSS: &str = "workspace-label";
@@ -22,8 +22,9 @@ const WORKSPACE_ICONS_CSS: &str = "workspace-icons";
 /// Context for building a workspace button.
 #[derive(Debug, Clone)]
 pub(crate) struct ButtonBuildContext<'a> {
-    pub id: WorkspaceId,
-    pub display_id: WorkspaceId,
+    pub id: String,
+    pub display_id: String,
+    pub kind: &'a str,
     pub name: &'a str,
     pub windows: u16,
     pub is_active: bool,
@@ -39,8 +40,9 @@ pub(crate) struct AppIconInit {
 
 #[derive(Debug, Clone)]
 pub(crate) struct WorkspaceButtonInit {
-    pub id: WorkspaceId,
-    pub display_id: WorkspaceId,
+    pub id: String,
+    pub display_id: String,
+    pub kind: String,
     pub name: String,
     pub windows: u16,
     pub is_active: bool,
@@ -67,13 +69,13 @@ pub(super) struct AppIcon {
 }
 
 pub(crate) struct WorkspaceButton {
-    id: WorkspaceId,
+    id: String,
     pub(super) state: WorkspaceState,
     pub(super) is_urgent: bool,
     pub(super) css_id_class: String,
     pub(super) static_classes: Vec<&'static str>,
 
-    pub(super) display_id: WorkspaceId,
+    pub(super) display_id: String,
     pub(super) name: String,
     pub(super) display_mode: DisplayMode,
     pub(super) label_use_name: bool,
@@ -102,7 +104,7 @@ pub(crate) enum WorkspaceButtonInput {
 
 #[derive(Debug)]
 pub(crate) enum WorkspaceButtonOutput {
-    Clicked(WorkspaceId),
+    Clicked(String),
     ScrollUp,
     ScrollDown,
 }
@@ -121,8 +123,8 @@ impl FactoryComponent for WorkspaceButton {
             #[watch]
             set_css_classes: &self.current_css_classes(),
 
-            connect_clicked[sender, id = self.id] => move |_| {
-                sender.output(WorkspaceButtonOutput::Clicked(id)).ok();
+            connect_clicked[sender, id = self.id.clone()] => move |_| {
+                sender.output(WorkspaceButtonOutput::Clicked(id.clone())).ok();
             },
 
             #[name = "content"]
@@ -174,8 +176,9 @@ impl FactoryComponent for WorkspaceButton {
 
     fn init_model(init: Self::Init, _index: &DynamicIndex, _sender: FactorySender<Self>) -> Self {
         let state = determine_workspace_state(init.is_active, init.windows);
+        let css_id_class = workspace_id_css_class(&init.id);
         let static_classes = compute_static_css_classes(
-            init.id,
+            is_special_workspace(&init.id, &init.kind),
             init.active_indicator.css_class(),
             init.is_vertical,
         );
@@ -184,7 +187,7 @@ impl FactoryComponent for WorkspaceButton {
             id: init.id,
             state,
             is_urgent: init.is_urgent,
-            css_id_class: workspace_id_css_class(init.id),
+            css_id_class,
             static_classes,
 
             display_id: init.display_id,
@@ -259,7 +262,9 @@ pub(crate) fn build_button_init(
     urgent_addresses: HashSet<Address>,
 ) -> WorkspaceButtonInit {
     let workspace_map = config.workspace_map.get();
-    let mapped_style = i32::try_from(ctx.id)
+    let mapped_style = ctx
+        .id
+        .parse::<i32>()
         .ok()
         .and_then(|style_id| workspace_map.get(&style_id));
     let mapped_icon = mapped_style.and_then(|style| style.icon.clone());
@@ -273,7 +278,7 @@ pub(crate) fn build_button_init(
             fallback: &fallback,
         };
         let resolved =
-            resolve_workspace_icons(ctx.id, clients, &icon_ctx, config.app_icons_dedupe.get());
+            resolve_workspace_icons(&ctx.id, clients, &icon_ctx, config.app_icons_dedupe.get());
         resolved
             .into_iter()
             .map(|resolved| AppIconInit {
@@ -288,8 +293,9 @@ pub(crate) fn build_button_init(
     let icon_gap_px = (config.icon_gap.get().value() * 16.0).round() as i32;
 
     WorkspaceButtonInit {
-        id: ctx.id,
-        display_id: ctx.display_id,
+        id: ctx.id.clone(),
+        display_id: ctx.display_id.clone(),
+        kind: ctx.kind.to_string(),
         name: ctx.name.to_string(),
         windows: ctx.windows,
         is_active: ctx.is_active,

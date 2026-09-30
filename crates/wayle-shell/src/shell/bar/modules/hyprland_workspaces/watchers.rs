@@ -75,16 +75,13 @@ async fn watch_workspace_events(
             event = events.next() => {
                 let Some(event) = event else { continue; };
                 match event {
-                    HyprlandEvent::WorkspaceV2 { id, .. } => {
-                        let _ = out.send(WorkspacesCmd::ActiveWorkspaceChanged(id));
+                    HyprlandEvent::WorkspaceV2 { address, .. } => {
+                        let _ = out.send(WorkspacesCmd::ActiveWorkspaceChanged(address));
                     }
-                    HyprlandEvent::FocusedMonV2 {
-                        name,
-                        workspace_id,
-                    } => {
+                    HyprlandEvent::FocusedMonV2 { name, workspace } => {
                         let _ = out.send(WorkspacesCmd::MonitorFocused {
                             monitor: name,
-                            workspace_id,
+                            workspace_id: workspace,
                         });
                     }
                     HyprlandEvent::CreateWorkspaceV2 { .. }

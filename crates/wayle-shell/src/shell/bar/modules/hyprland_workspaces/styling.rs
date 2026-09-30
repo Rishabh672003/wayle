@@ -66,7 +66,7 @@ pub(super) fn apply_styling(
             continue;
         };
 
-        let id_class = workspace_id_css_class(i64::from(*workspace_id));
+        let id_class = workspace_id_css_class(&workspace_id.to_string());
         let color_css = color.to_css();
         css.push_str(&format!(
             ".workspaces .workspace.{id_class} {{ --ws-override-color: {color_css}; }}"

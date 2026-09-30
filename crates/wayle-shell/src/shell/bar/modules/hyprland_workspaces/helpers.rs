@@ -6,7 +6,7 @@ use std::{
 
 use glob::Pattern;
 use wayle_config::schemas::modules::{DisplayMode, Numbering};
-use wayle_hyprland::{Address, Client, WorkspaceId};
+use wayle_hyprland::{Address, Client};
 
 use super::filtering::relative_workspace_number;
 use crate::shell::bar::icons::{DEFAULT_APP_ICON_MAP, matches_glob};
@@ -66,7 +66,7 @@ pub(crate) struct ResolvedIcon {
 }
 
 pub(crate) fn resolve_workspace_icons(
-    workspace_id: WorkspaceId,
+    workspace_id: &str,
     clients: &[Arc<Client>],
     ctx: &IconContext<'_>,
     dedupe: bool,
@@ -76,7 +76,7 @@ pub(crate) fn resolve_workspace_icons(
 
     for client in clients
         .iter()
-        .filter(|client| client.workspace.get().id == workspace_id)
+        .filter(|client| client.workspace.get().address == workspace_id)
     {
         let class = client.class.get();
         let title = client.title.get();
@@ -109,13 +109,13 @@ pub(crate) fn has_title_patterns(user_map: &BTreeMap<String, String>) -> bool {
 }
 
 pub(super) fn format_workspace_label(
-    display_id: WorkspaceId,
-    absolute_id: WorkspaceId,
+    display_id: &str,
+    absolute_id: &str,
     name: &str,
     use_name: bool,
 ) -> String {
     if use_name && !name.is_empty() {
-        let is_default_name = name == absolute_id.to_string();
+        let is_default_name = name == absolute_id;
         if is_default_name {
             display_id.to_string()
         } else {
@@ -143,23 +143,36 @@ impl WorkspaceState {
     }
 }
 
-pub(crate) fn workspace_id_css_class(id: WorkspaceId) -> String {
-    if id < 0 {
-        format!("workspace-id-neg{}", id.unsigned_abs())
-    } else {
-        format!("workspace-id-{id}")
+pub(crate) fn workspace_id_css_class(workspace_address: &str) -> String {
+    if let Ok(id) = workspace_address.parse::<i64>()
+        && id < 0
+    {
+        return format!("workspace-id-neg{}", id.unsigned_abs());
     }
+
+    let mut sanitized = String::with_capacity(workspace_address.len());
+    for c in workspace_address.chars() {
+        if c.is_alphanumeric() || c == '-' || c == '_' {
+            sanitized.push(c);
+        } else {
+            sanitized.push('-');
+        }
+    }
+    format!("workspace-id-{sanitized}")
 }
 
-pub(crate) fn matches_ignore_patterns(id: WorkspaceId, patterns: &[String]) -> bool {
+pub(crate) fn is_special_workspace(workspace_address: &str, kind: &str) -> bool {
+    kind == "special" || workspace_address.parse::<i64>().is_ok_and(|id| id < 0)
+}
+
+pub(crate) fn matches_ignore_patterns(workspace_address: &str, patterns: &[String]) -> bool {
     if patterns.is_empty() {
         return false;
     }
 
-    let id_str = id.to_string();
     for pattern in patterns {
         if let Ok(glob) = Pattern::new(pattern)
-            && glob.matches(&id_str)
+            && glob.matches(workspace_address)
         {
             return true;
         }
@@ -178,12 +191,12 @@ pub(crate) fn determine_workspace_state(is_active: bool, windows: u16) -> Worksp
 }
 
 pub(crate) fn compute_static_css_classes(
-    id: WorkspaceId,
+    is_special: bool,
     indicator_class: &'static str,
     is_vertical: bool,
 ) -> Vec<&'static str> {
     let mut classes = vec!["workspace", indicator_class];
-    if id < 0 {
+    if is_special {
         classes.push("special");
     }
     if is_vertical {
@@ -216,16 +229,17 @@ pub(crate) fn should_show_divider(
 }
 
 pub(crate) fn compute_display_id(
-    id: WorkspaceId,
+    id: &str,
     numbering: Numbering,
     bar_monitor: Option<&str>,
-    monitor_workspaces: &[WorkspaceId],
-) -> WorkspaceId {
+    monitor_workspaces: &[String],
+) -> String {
     match numbering {
-        Numbering::Absolute => id,
+        Numbering::Absolute => id.to_string(),
         Numbering::Relative => {
-            if id <= 0 || bar_monitor.is_none() {
-                return id;
+            let numeric = id.parse::<i64>();
+            if numeric.map_or(true, |value| value <= 0) || bar_monitor.is_none() {
+                return id.to_string();
             }
             relative_workspace_number(id, monitor_workspaces)
         }
@@ -248,9 +262,9 @@ pub(crate) fn should_update_for_monitor(
 }
 
 pub(crate) fn workspace_contains_urgent_address<A: Eq + Hash>(
-    workspace_id: WorkspaceId,
+    workspace_id: &str,
     urgent_addresses: &HashSet<A>,
-    client_workspaces: &[(A, WorkspaceId)],
+    client_workspaces: &[(A, String)],
 ) -> bool {
     if urgent_addresses.is_empty() {
         return false;
@@ -258,16 +272,16 @@ pub(crate) fn workspace_contains_urgent_address<A: Eq + Hash>(
 
     client_workspaces
         .iter()
-        .any(|(address, ws_id)| *ws_id == workspace_id && urgent_addresses.contains(address))
+        .any(|(address, workspace)| workspace == workspace_id && urgent_addresses.contains(address))
 }
 
 pub(crate) fn addresses_in_workspace<A: Clone>(
-    workspace_id: WorkspaceId,
-    client_workspaces: &[(A, WorkspaceId)],
+    workspace_id: &str,
+    client_workspaces: &[(A, String)],
 ) -> Vec<A> {
     client_workspaces
         .iter()
-        .filter(|(_, ws_id)| *ws_id == workspace_id)
+        .filter(|(_, workspace)| workspace == workspace_id)
         .map(|(addr, _)| addr.clone())
         .collect()
 }
@@ -387,32 +401,35 @@ mod tests {
 
         #[test]
         fn use_id_when_name_disabled() {
-            assert_eq!(format_workspace_label(1, 1, "main", false), "1");
+            assert_eq!(format_workspace_label("1", "1", "main", false), "1");
         }
 
         #[test]
         fn use_custom_name_when_enabled() {
-            assert_eq!(format_workspace_label(1, 1, "main", true), "main");
+            assert_eq!(format_workspace_label("1", "1", "main", true), "main");
         }
 
         #[test]
         fn fallback_to_id_on_empty_name() {
-            assert_eq!(format_workspace_label(2, 2, "", true), "2");
+            assert_eq!(format_workspace_label("2", "2", "", true), "2");
         }
 
         #[test]
         fn negative_id_for_special() {
-            assert_eq!(format_workspace_label(-99, -99, "scratchpad", false), "-99");
+            assert_eq!(
+                format_workspace_label("-99", "-99", "scratchpad", false),
+                "-99"
+            );
         }
 
         #[test]
         fn relative_numbering_with_default_name() {
-            assert_eq!(format_workspace_label(1, 4, "4", true), "1");
+            assert_eq!(format_workspace_label("1", "4", "4", true), "1");
         }
 
         #[test]
         fn relative_numbering_with_custom_name() {
-            assert_eq!(format_workspace_label(1, 4, "browser", true), "browser");
+            assert_eq!(format_workspace_label("1", "4", "browser", true), "browser");
         }
     }
 
@@ -461,32 +478,32 @@ mod tests {
 
         #[test]
         fn includes_base_and_indicator() {
-            let classes = compute_static_css_classes(1, "indicator-background", false);
+            let classes = compute_static_css_classes(false, "indicator-background", false);
             assert!(classes.contains(&"workspace"));
             assert!(classes.contains(&"indicator-background"));
         }
 
         #[test]
-        fn adds_special_for_negative_id() {
-            let classes = compute_static_css_classes(-99, "indicator-background", false);
+        fn adds_special_for_special_workspace() {
+            let classes = compute_static_css_classes(true, "indicator-background", false);
             assert!(classes.contains(&"special"));
         }
 
         #[test]
-        fn no_special_for_positive_id() {
-            let classes = compute_static_css_classes(1, "indicator-background", false);
+        fn no_special_for_numbered_workspace() {
+            let classes = compute_static_css_classes(false, "indicator-background", false);
             assert!(!classes.contains(&"special"));
         }
 
         #[test]
         fn adds_vertical_class() {
-            let classes = compute_static_css_classes(1, "indicator-underline", true);
+            let classes = compute_static_css_classes(false, "indicator-underline", true);
             assert!(classes.contains(&"vertical"));
         }
 
         #[test]
         fn no_vertical_when_horizontal() {
-            let classes = compute_static_css_classes(1, "indicator-underline", false);
+            let classes = compute_static_css_classes(false, "indicator-underline", false);
             assert!(!classes.contains(&"vertical"));
         }
     }
@@ -590,46 +607,70 @@ mod tests {
 
         #[test]
         fn absolute_returns_id() {
+            let monitor_workspaces = vec!["1".to_string(), "2".to_string(), "5".to_string()];
             assert_eq!(
-                compute_display_id(5, Numbering::Absolute, Some("DP-1"), &[1, 2, 5]),
-                5
+                compute_display_id("5", Numbering::Absolute, Some("DP-1"), &monitor_workspaces),
+                "5"
             );
         }
 
         #[test]
         fn absolute_returns_id_without_monitor() {
-            assert_eq!(compute_display_id(5, Numbering::Absolute, None, &[]), 5);
+            assert_eq!(compute_display_id("5", Numbering::Absolute, None, &[]), "5");
         }
 
         #[test]
         fn relative_returns_position() {
+            let monitor_workspaces = vec!["4".to_string(), "5".to_string(), "6".to_string()];
             assert_eq!(
-                compute_display_id(5, Numbering::Relative, Some("DP-1"), &[4, 5, 6]),
-                2
+                compute_display_id("5", Numbering::Relative, Some("DP-1"), &monitor_workspaces),
+                "2"
             );
         }
 
         #[test]
         fn relative_returns_id_for_special_workspace() {
+            let monitor_workspaces = vec!["1".to_string(), "2".to_string(), "3".to_string()];
             assert_eq!(
-                compute_display_id(-99, Numbering::Relative, Some("DP-1"), &[1, 2, 3]),
-                -99
+                compute_display_id(
+                    "-99",
+                    Numbering::Relative,
+                    Some("DP-1"),
+                    &monitor_workspaces
+                ),
+                "-99"
+            );
+        }
+
+        #[test]
+        fn relative_returns_id_for_named_workspace() {
+            let monitor_workspaces = vec!["1".to_string(), "2".to_string(), "3".to_string()];
+            assert_eq!(
+                compute_display_id(
+                    "web",
+                    Numbering::Relative,
+                    Some("DP-1"),
+                    &monitor_workspaces
+                ),
+                "web"
             );
         }
 
         #[test]
         fn relative_returns_id_without_monitor() {
+            let monitor_workspaces = vec!["1".to_string(), "2".to_string(), "5".to_string()];
             assert_eq!(
-                compute_display_id(5, Numbering::Relative, None, &[1, 2, 5]),
-                5
+                compute_display_id("5", Numbering::Relative, None, &monitor_workspaces),
+                "5"
             );
         }
 
         #[test]
         fn relative_returns_id_when_not_in_list() {
+            let monitor_workspaces = vec!["1".to_string(), "2".to_string(), "3".to_string()];
             assert_eq!(
-                compute_display_id(10, Numbering::Relative, Some("DP-1"), &[1, 2, 3]),
-                10
+                compute_display_id("10", Numbering::Relative, Some("DP-1"), &monitor_workspaces),
+                "10"
             );
         }
     }
@@ -664,32 +705,48 @@ mod tests {
         #[test]
         fn returns_false_for_empty_urgent() {
             let urgent: HashSet<u32> = HashSet::new();
-            let clients = vec![(1u32, 1i64), (2, 1), (3, 2)];
-            assert!(!workspace_contains_urgent_address(1, &urgent, &clients));
+            let clients = vec![
+                (1u32, "1".to_string()),
+                (2, "1".to_string()),
+                (3, "2".to_string()),
+            ];
+            assert!(!workspace_contains_urgent_address("1", &urgent, &clients));
         }
 
         #[test]
         fn returns_true_when_urgent_in_workspace() {
             let mut urgent = HashSet::new();
             urgent.insert(2u32);
-            let clients = vec![(1u32, 1i64), (2, 1), (3, 2)];
-            assert!(workspace_contains_urgent_address(1, &urgent, &clients));
+            let clients = vec![
+                (1u32, "1".to_string()),
+                (2, "1".to_string()),
+                (3, "2".to_string()),
+            ];
+            assert!(workspace_contains_urgent_address("1", &urgent, &clients));
         }
 
         #[test]
         fn returns_false_when_urgent_in_different_workspace() {
             let mut urgent = HashSet::new();
             urgent.insert(3u32);
-            let clients = vec![(1u32, 1i64), (2, 1), (3, 2)];
-            assert!(!workspace_contains_urgent_address(1, &urgent, &clients));
+            let clients = vec![
+                (1u32, "1".to_string()),
+                (2, "1".to_string()),
+                (3, "2".to_string()),
+            ];
+            assert!(!workspace_contains_urgent_address("1", &urgent, &clients));
         }
 
         #[test]
         fn returns_false_when_address_not_in_clients() {
             let mut urgent = HashSet::new();
             urgent.insert(99u32);
-            let clients = vec![(1u32, 1i64), (2, 1), (3, 2)];
-            assert!(!workspace_contains_urgent_address(1, &urgent, &clients));
+            let clients = vec![
+                (1u32, "1".to_string()),
+                (2, "1".to_string()),
+                (3, "2".to_string()),
+            ];
+            assert!(!workspace_contains_urgent_address("1", &urgent, &clients));
         }
     }
 
@@ -698,22 +755,27 @@ mod tests {
 
         #[test]
         fn returns_matching_addresses() {
-            let clients = vec![(1u32, 1i64), (2, 1), (3, 2), (4, 1)];
-            let result = addresses_in_workspace(1, &clients);
+            let clients = vec![
+                (1u32, "1".to_string()),
+                (2, "1".to_string()),
+                (3, "2".to_string()),
+                (4, "1".to_string()),
+            ];
+            let result = addresses_in_workspace("1", &clients);
             assert_eq!(result, vec![1, 2, 4]);
         }
 
         #[test]
         fn returns_empty_for_no_matches() {
-            let clients = vec![(1u32, 2i64), (2, 2)];
-            let result = addresses_in_workspace(1, &clients);
+            let clients = vec![(1u32, "2".to_string()), (2, "2".to_string())];
+            let result = addresses_in_workspace("1", &clients);
             assert!(result.is_empty());
         }
 
         #[test]
         fn returns_empty_for_empty_clients() {
-            let clients: Vec<(u32, i64)> = vec![];
-            let result = addresses_in_workspace(1, &clients);
+            let clients: Vec<(u32, String)> = vec![];
+            let result = addresses_in_workspace("1", &clients);
             assert!(result.is_empty());
         }
     }
@@ -771,34 +833,42 @@ mod tests {
         #[test]
         fn exact_match() {
             let patterns = vec!["10".to_string()];
-            assert!(matches_ignore_patterns(10, &patterns));
-            assert!(!matches_ignore_patterns(1, &patterns));
-            assert!(!matches_ignore_patterns(100, &patterns));
+            assert!(matches_ignore_patterns("10", &patterns));
+            assert!(!matches_ignore_patterns("1", &patterns));
+            assert!(!matches_ignore_patterns("100", &patterns));
         }
 
         #[test]
         fn wildcard_single_char() {
             let patterns = vec!["1?".to_string()];
-            assert!(matches_ignore_patterns(10, &patterns));
-            assert!(matches_ignore_patterns(11, &patterns));
-            assert!(matches_ignore_patterns(19, &patterns));
-            assert!(!matches_ignore_patterns(1, &patterns));
-            assert!(!matches_ignore_patterns(100, &patterns));
+            assert!(matches_ignore_patterns("10", &patterns));
+            assert!(matches_ignore_patterns("11", &patterns));
+            assert!(matches_ignore_patterns("19", &patterns));
+            assert!(!matches_ignore_patterns("1", &patterns));
+            assert!(!matches_ignore_patterns("100", &patterns));
         }
 
         #[test]
         fn wildcard_multi_char() {
             let patterns = vec!["1*".to_string()];
-            assert!(matches_ignore_patterns(1, &patterns));
-            assert!(matches_ignore_patterns(10, &patterns));
-            assert!(matches_ignore_patterns(100, &patterns));
-            assert!(!matches_ignore_patterns(2, &patterns));
+            assert!(matches_ignore_patterns("1", &patterns));
+            assert!(matches_ignore_patterns("10", &patterns));
+            assert!(matches_ignore_patterns("100", &patterns));
+            assert!(!matches_ignore_patterns("2", &patterns));
         }
 
         #[test]
         fn empty_patterns() {
             let patterns: Vec<String> = vec![];
-            assert!(!matches_ignore_patterns(10, &patterns));
+            assert!(!matches_ignore_patterns("10", &patterns));
+        }
+
+        #[test]
+        fn named_workspace_match() {
+            let patterns = vec!["special:magic".to_string(), "web".to_string()];
+            assert!(matches_ignore_patterns("special:magic", &patterns));
+            assert!(matches_ignore_patterns("web", &patterns));
+            assert!(!matches_ignore_patterns("other", &patterns));
         }
     }
 }
