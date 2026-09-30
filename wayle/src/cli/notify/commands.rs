@@ -26,6 +26,9 @@ pub enum NotifyCommands {
     /// Toggle Do Not Disturb mode
     Dnd,
 
+    /// Print whether Do Not Disturb is enabled (`true`/`false`)
+    IsDnd,
+
     /// Show notification status
     Status,
 }

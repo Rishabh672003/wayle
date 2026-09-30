@@ -8,6 +8,8 @@ pub mod dismiss_all;
 pub mod dnd;
 /// Notification history command
 pub mod history;
+/// Do Not Disturb state query command
+pub mod is_dnd;
 /// List notifications command
 pub mod list;
 mod proxy;
@@ -29,6 +31,7 @@ pub async fn execute(command: NotifyCommands) -> CliAction {
         NotifyCommands::Dismiss { id } => dismiss::execute(id).await,
         NotifyCommands::DismissAll => dismiss_all::execute().await,
         NotifyCommands::Dnd => dnd::execute().await,
+        NotifyCommands::IsDnd => is_dnd::execute().await,
         NotifyCommands::Status => status::execute().await,
     }
 }
