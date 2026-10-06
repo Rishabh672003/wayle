@@ -168,8 +168,7 @@ impl Osd {
             state,
             DeviceState::Discharging | DeviceState::PendingDischarge
         );
-        let charging =
-            matches!(state, DeviceState::Charging | DeviceState::FullyCharged);
+        let charging = matches!(state, DeviceState::Charging | DeviceState::FullyCharged);
 
         // Reset the low latch once charging or recovered above threshold.
         if charging || percentage > BATTERY_LOW_THRESHOLD {
@@ -200,11 +199,7 @@ impl Osd {
             };
 
             if let Some((label, icon)) = transition {
-                self.show_event(
-                    Self::battery_event(label, icon, percentage),
-                    sender,
-                    root,
-                );
+                self.show_event(Self::battery_event(label, icon, percentage), sender, root);
                 return;
             }
         }
@@ -468,11 +463,25 @@ pub(super) fn event_icon(event: &Option<OsdEvent>) -> Option<&str> {
     }
 }
 
+/// Longest slider label shown before truncating with an ellipsis.
+const MAX_SLIDER_LABEL_CHARS: usize = 24;
+
+/// Truncated here rather than via GTK ellipsizing: an ellipsizing label reports a
+/// near-zero minimum width, and the OSD window is sized to its minimum, so GTK would
+/// cut the text even when there is room.
 pub(super) fn event_slider_label(event: &Option<OsdEvent>) -> String {
     match event {
-        Some(OsdEvent::Slider { label, .. }) => label.clone(),
+        Some(OsdEvent::Slider { label, .. }) => truncate_label(label),
         _ => String::new(),
     }
+}
+
+fn truncate_label(label: &str) -> String {
+    if label.chars().count() <= MAX_SLIDER_LABEL_CHARS {
+        return label.to_string();
+    }
+    let kept: String = label.chars().take(MAX_SLIDER_LABEL_CHARS - 1).collect();
+    format!("{}…", kept.trim_end())
 }
 
 pub(super) fn event_label(event: &Option<OsdEvent>) -> String {
@@ -518,5 +527,19 @@ fn volume_icon(percentage: f64, muted: bool) -> &'static str {
         "ld-volume-1-symbolic"
     } else {
         "ld-volume-2-symbolic"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_label;
+
+    #[test]
+    fn truncate_label_keeps_short_and_caps_long() {
+        assert_eq!(truncate_label("Volume"), "Volume");
+        let long = "Sony WH-1000XM5 Wireless Noise Cancelling";
+        let out = truncate_label(long);
+        assert!(out.chars().count() <= 24);
+        assert!(out.ends_with('…'));
     }
 }

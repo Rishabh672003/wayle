@@ -5,7 +5,7 @@ mod watchers;
 
 use std::{sync::Arc, time::Duration};
 
-use gtk::{pango::EllipsizeMode, prelude::*};
+use gtk::prelude::*;
 use gtk4_layer_shell::{KeyboardMode, LayerShell};
 use relm4::{gtk, prelude::*};
 use tracing::debug;
@@ -107,7 +107,6 @@ impl Component for Osd {
                         set_hexpand: true,
                         set_halign: gtk::Align::Start,
                         set_valign: gtk::Align::Center,
-                        set_ellipsize: EllipsizeMode::End,
 
                         #[watch]
                         set_label: &event_slider_label(&model.current_event),
