@@ -11,7 +11,10 @@ use tracing::debug;
 use wayle_systray::{
     adapters::gtk4::{Adapter, TrayMenuModel},
     core::item::TrayItem,
-    types::Coordinates,
+    types::{
+        Coordinates,
+        item::{IconPixmap, Status},
+    },
 };
 
 use super::{
@@ -169,14 +172,35 @@ impl SystrayItem {
         let overrides = self.config.config().modules.systray.overrides.get();
         let override_match = find_override(&self.item, &overrides);
 
+        let needs_attention = self.item.status.get() == Status::NeedsAttention;
+        if let Some(button) = self.button.as_ref() {
+            if needs_attention {
+                button.add_css_class("needs-attention");
+            } else {
+                button.remove_css_class("needs-attention");
+            }
+        }
+
+        // SNI spec: NeedsAttention items should be emphasized, so use the
+        // attention icon when the app provides one.
+        let attention_name = self.item.attention_icon_name.get();
+        let attention_pixmap = self.item.attention_icon_pixmap.get();
+        let use_attention =
+            needs_attention && (attention_name.is_some() || !attention_pixmap.is_empty());
+        let (item_icon_name, pixmaps) = if use_attention {
+            (attention_name, attention_pixmap)
+        } else {
+            (self.item.icon_name.get(), self.item.icon_pixmap.get())
+        };
+
         let icon_name = override_match
             .and_then(|entry| entry.icon.clone())
-            .or_else(|| self.item.icon_name.get());
+            .or(item_icon_name);
 
-        let icon_signature = self.icon_signature(icon_name.as_deref());
+        let icon_signature = self.icon_signature(icon_name.as_deref(), &pixmaps);
 
         if self.icon_signature.as_ref() != Some(&icon_signature) {
-            self.apply_icon(image, icon_name.as_deref());
+            self.apply_icon(image, icon_name.as_deref(), &pixmaps);
             self.icon_signature = Some(icon_signature);
         }
 
@@ -187,7 +211,7 @@ impl SystrayItem {
         }
     }
 
-    fn icon_signature(&self, icon_name: Option<&str>) -> IconSignature {
+    fn icon_signature(&self, icon_name: Option<&str>, pixmaps: &[IconPixmap]) -> IconSignature {
         if let Some(name) = icon_name {
             let theme_path = self.item.icon_theme_path.get();
 
@@ -205,12 +229,11 @@ impl SystrayItem {
             return IconSignature::Named(name.to_owned());
         }
 
-        let pixmaps = self.item.icon_pixmap.get();
         if pixmaps.is_empty() {
             return IconSignature::Fallback;
         }
 
-        IconSignature::Pixmap(hash_pixmaps(&pixmaps))
+        IconSignature::Pixmap(hash_pixmaps(pixmaps))
     }
 
     fn apply_icon_color(&mut self, image: &gtk::Image, css_color: &str) {
@@ -240,7 +263,7 @@ impl SystrayItem {
         }
     }
 
-    fn apply_icon(&self, image: &gtk::Image, icon_name: Option<&str>) {
+    fn apply_icon(&self, image: &gtk::Image, icon_name: Option<&str>, pixmaps: &[IconPixmap]) {
         image.clear();
 
         if let Some(name) = icon_name {
@@ -262,8 +285,7 @@ impl SystrayItem {
             return;
         }
 
-        let pixmaps = self.item.icon_pixmap.get();
-        if let Some(texture) = select_best_pixmap(&pixmaps).and_then(create_texture_from_pixmap) {
+        if let Some(texture) = select_best_pixmap(pixmaps).and_then(create_texture_from_pixmap) {
             image.set_paintable(Some(&texture));
             return;
         }

@@ -157,7 +157,6 @@ impl FactoryComponent for SystrayItem {
         watchers::spawn_menu_watcher(&sender, &self.item, self.cancel_token.clone());
         watchers::spawn_icon_watcher(&sender, &self.item, self.cancel_token.clone());
         watchers::spawn_tooltip_watcher(&sender, &self.item, self.cancel_token.clone());
-        watchers::spawn_tooltip_refresher(&self.item, self.cancel_token.clone());
 
         let widgets = view_output!();
 

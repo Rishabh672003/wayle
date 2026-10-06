@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use futures::{StreamExt, stream::select_all};
 use relm4::ComponentSender;
 use wayle_config::{ConfigProperty, ConfigService};
 use wayle_systray::SystemTrayService;
@@ -27,6 +28,37 @@ pub(super) fn spawn_watchers(
             let _ = out.send(SystrayCmd::ItemsChanged(items.get()));
         }
     );
+
+    // Passive items are hidden, so refilter whenever any item's status flips.
+    let items = systray.items.clone();
+    sender.command(move |out, shutdown| async move {
+        let mut list = items.watch();
+        let watch_statuses = async {
+            let Some(mut current) = list.next().await else {
+                return;
+            };
+            loop {
+                let mut statuses = select_all(
+                    current
+                        .iter()
+                        .map(|item| Box::pin(item.status.watch().skip(1))),
+                );
+                tokio::select! {
+                    next = list.next() => match next {
+                        Some(next) => current = next,
+                        None => return,
+                    },
+                    Some(_) = statuses.next() => {
+                        let _ = out.send(SystrayCmd::ItemsChanged(items.get()));
+                    }
+                }
+            }
+        };
+        tokio::select! {
+            () = shutdown.wait() => {}
+            () = watch_statuses => {}
+        }
+    });
 
     let item_gap = systray_config.item_gap.clone();
     let icon_scale = systray_config.icon_scale.clone();

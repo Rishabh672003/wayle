@@ -18,6 +18,10 @@
     image {
         -gtk-icon-size: calc(var(--systray-icon-size-px) * 1px);
     }
+
+    &.needs-attention image {
+        color: var(--status-warning);
+    }
 }
 
 .bar-container.vertical .systray-item {

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use wayle_systray::core::item::TrayItem;
+use wayle_systray::{core::item::TrayItem, types::item::Status};
 
 use super::{SystrayModule, helpers::is_blacklisted, item::SystrayItemInit};
 
@@ -12,7 +12,7 @@ impl SystrayModule {
         guard.clear();
 
         for item in items {
-            if is_blacklisted(&item, config) {
+            if item.status.get() == Status::Passive || is_blacklisted(&item, config) {
                 continue;
             }
             guard.push_back(SystrayItemInit {
