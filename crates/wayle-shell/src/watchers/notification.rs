@@ -38,7 +38,10 @@ pub fn spawn(services: &ShellServices) {
 
     let config = services.config.config();
     spawn_blocklist_watcher(&config.modules.notifications, notification);
-    spawn_history_collector(notification, services.shell_ipc.state().notification_history);
+    spawn_history_collector(
+        notification,
+        services.shell_ipc.state().notification_history,
+    );
 }
 
 /// Archives notifications that leave the active list (dismissed or expired)

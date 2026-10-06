@@ -286,8 +286,7 @@ impl HyprlandWorkspaces {
         // Monitor-specific placeholders require explicit `workspace = N, monitor:X`
         // rules, which don't exist on a single-monitor setup — treat it as global
         // there so `min-workspace-count` placeholders actually appear.
-        let monitor_specific =
-            config.monitor_specific.get() && hyprland.monitors.get().len() > 1;
+        let monitor_specific = config.monitor_specific.get() && hyprland.monitors.get().len() > 1;
 
         let ctx = FilterContext {
             show_special: config.show_special.get(),

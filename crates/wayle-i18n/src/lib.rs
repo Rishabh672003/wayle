@@ -36,8 +36,13 @@ fn requested_languages() -> Vec<LanguageIdentifier> {
     raw.split(':')
         .filter_map(|entry| {
             // Strip encoding (`.UTF-8`) and modifier (`@euro`), normalize `_`.
-            let tag = entry.split(['.', '@']).next().unwrap_or(entry).replace('_', "-");
-            if tag.is_empty() || tag.eq_ignore_ascii_case("C") || tag.eq_ignore_ascii_case("POSIX") {
+            let tag = entry
+                .split(['.', '@'])
+                .next()
+                .unwrap_or(entry)
+                .replace('_', "-");
+            if tag.is_empty() || tag.eq_ignore_ascii_case("C") || tag.eq_ignore_ascii_case("POSIX")
+            {
                 return None;
             }
             tag.parse().ok()
