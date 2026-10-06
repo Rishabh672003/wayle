@@ -34,6 +34,8 @@ pub(crate) struct BatterySection {
     charge_end_threshold: u32,
     charge_threshold_supported: bool,
     charge_threshold_enabled: bool,
+    /// Kernel thresholds managed outside UPower; switch is read-only when set.
+    sysfs_limit: Option<(u32, u32)>,
 }
 
 #[relm4::component(pub(crate))]
@@ -267,6 +269,8 @@ impl Component for BatterySection {
                             #[watch]
                             #[block_signal(limit_handler)]
                             set_active: model.charge_threshold_enabled,
+                            #[watch]
+                            set_sensitive: model.sysfs_limit.is_none(),
                             connect_state_set[sender] => move |switch, active| {
                                 sender.input(BatterySectionInput::ChargeLimitToggled(active));
                                 switch.set_state(active);
@@ -303,7 +307,7 @@ impl Component for BatterySection {
     ) -> ComponentParts<Self> {
         let device = &init.battery.device;
 
-        let model = Self {
+        let mut model = Self {
             percentage: device.percentage.get(),
             state: device.state.get(),
             time_to_empty: device.time_to_empty.get(),
@@ -317,8 +321,10 @@ impl Component for BatterySection {
             charge_end_threshold: device.charge_end_threshold.get(),
             charge_threshold_supported: device.charge_threshold_supported.get(),
             charge_threshold_enabled: device.charge_threshold_enabled.get(),
+            sysfs_limit: None,
             battery: init.battery.clone(),
         };
+        model.apply_sysfs_limit();
 
         watchers::spawn(&sender, &init.battery);
 

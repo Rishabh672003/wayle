@@ -109,6 +109,32 @@ pub(super) fn is_low_battery(warning_level: &WarningLevel) -> bool {
     )
 }
 
+/// Kernel charge thresholds `(start, end)` of the first battery, as set by tools like
+/// auto-cpufreq or TLP. UPower's DisplayDevice never reports threshold support, so this
+/// is the only reliable source.
+pub(super) fn read_sysfs_charge_limit() -> Option<(u32, u32)> {
+    let dir = std::fs::read_dir("/sys/class/power_supply")
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("BAT"))
+        })?;
+
+    let read = |file: &str| {
+        std::fs::read_to_string(dir.join(file))
+            .ok()?
+            .trim()
+            .parse::<u32>()
+            .ok()
+    };
+
+    let end = read("charge_control_end_threshold")?;
+    let start = read("charge_control_start_threshold").unwrap_or(end.saturating_sub(5));
+    Some((start, end))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

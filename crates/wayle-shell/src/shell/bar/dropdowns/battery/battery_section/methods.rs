@@ -22,6 +22,16 @@ impl BatterySection {
         self.charge_end_threshold = device.charge_end_threshold.get();
         self.charge_threshold_supported = device.charge_threshold_supported.get();
         self.charge_threshold_enabled = device.charge_threshold_enabled.get();
+        self.apply_sysfs_limit();
+    }
+
+    pub(super) fn apply_sysfs_limit(&mut self) {
+        self.sysfs_limit = helpers::read_sysfs_charge_limit();
+        if let Some((_, end)) = self.sysfs_limit {
+            self.charge_threshold_supported = true;
+            self.charge_threshold_enabled = end < 100;
+            self.charge_end_threshold = end;
+        }
     }
 
     pub(super) fn handle_charge_limit_toggled(
@@ -29,6 +39,11 @@ impl BatterySection {
         enabled: bool,
         sender: &ComponentSender<Self>,
     ) {
+        // GTK emits state-set when the initial value is applied; also skip when the
+        // kernel thresholds are owned by another tool (auto-cpufreq/TLP).
+        if enabled == self.charge_threshold_enabled || self.sysfs_limit.is_some() {
+            return;
+        }
         self.charge_threshold_enabled = enabled;
         let battery = self.battery.clone();
 
@@ -113,6 +128,8 @@ impl BatterySection {
     }
 
     pub(super) fn resume_threshold(&self) -> u32 {
-        self.charge_end_threshold.saturating_sub(5)
+        self.sysfs_limit
+            .map(|(start, _)| start)
+            .unwrap_or(self.charge_end_threshold.saturating_sub(5))
     }
 }
