@@ -101,7 +101,7 @@ wayle-bluetooth = "0.1.2"
 wayle-brightness = "0.1.2"
 wayle-cava = { version = "0.1.2", features = ["vendored"] }
 wayle-core = "0.1.2"
-wayle-hyprland = "0.2.3"
+wayle-hyprland = "0.3.0"
 wayle-mango = "0.1.1"
 wayle-niri = "0.1.0"
 wayle-media = "0.1.2"
@@ -145,3 +145,9 @@ unsafe_code = "deny"
 [profile.release]
 lto = true
 codegen-units = 1
+
+[patch.crates-io]
+wayle-audio = { path = "../wayle-services/wayle-audio" }
+wayle-hyprland = { path = "../wayle-services/wayle-hyprland" }
+wayle-systray = { path = "../wayle-services/wayle-systray" }
+wayle-power-profiles = { path = "../wayle-services/wayle-power-profiles" }
