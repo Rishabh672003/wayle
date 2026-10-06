@@ -109,24 +109,6 @@ impl Component for NotificationPopupCard {
                         set_visible: model.notification.body.get().is_some(),
                     },
                 },
-
-                gtk::Button {
-                    set_widget_name: "notification-dismiss-btn",
-                    add_css_class: "notification-popup-close",
-                    set_icon_name: "window-close-symbolic",
-                    set_valign: gtk::Align::Start,
-                    set_cursor_from_name: Some("pointer"),
-                    connect_clicked[
-                        service = model.service.clone(),
-                        notification = model.notification.clone(),
-                        close_behavior = model.close_behavior,
-                    ] => move |_| {
-                        match close_behavior {
-                            PopupCloseBehavior::Dismiss => service.dismiss_popup(notification.id),
-                            PopupCloseBehavior::Remove => notification.dismiss(),
-                        }
-                    },
-                },
             },
 
             #[name = "actions_box"]

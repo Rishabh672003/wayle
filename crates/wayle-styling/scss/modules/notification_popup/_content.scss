@@ -71,30 +71,3 @@ image.notification-popup-icon-img {
         color: var(--accent);
     }
 }
-
-.notification-popup-close {
-    padding: var(--space-xs);
-    margin-top: calc(var(--space-xs) * -1);
-    border-radius: var(--rounding-element);
-    opacity: 0;
-    transition:
-        opacity var(--duration-fast),
-        background var(--duration-fast);
-
-    image {
-        -gtk-icon-size: var(--icon-sm);
-        color: var(--fg-subtle);
-    }
-
-    .notification-popup-card:hover & {
-        opacity: 1;
-    }
-
-    &:hover {
-        background: var(--bg-overlay);
-
-        image {
-            color: var(--fg-default);
-        }
-    }
-}

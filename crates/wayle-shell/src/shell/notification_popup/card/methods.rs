@@ -140,12 +140,8 @@ impl NotificationPopupCard {
         button
     }
 
+    /// Left click runs the default action (if any) and closes; right click only closes.
     pub(super) fn setup_default_action(&self, root: &gtk::Box) {
-        let default_action = self.notification.default_action.get();
-        if default_action.is_none() {
-            return;
-        }
-
         root.set_cursor_from_name(Some("pointer"));
 
         let notification = self.notification.clone();
@@ -154,6 +150,7 @@ impl NotificationPopupCard {
         let close_behavior = self.close_behavior;
 
         let click = gtk::GestureClick::new();
+        click.set_button(0);
         click.connect_released(move |gesture, _, _, _| {
             gesture.set_state(gtk::EventSequenceState::Claimed);
             let notif = notification.clone();
@@ -161,11 +158,15 @@ impl NotificationPopupCard {
                 PopupCloseBehavior::Dismiss => service.dismiss_popup(notif_id),
                 PopupCloseBehavior::Remove => notif.dismiss(),
             }
-            spawn_local(async move {
-                if let Err(err) = notif.invoke(Action::DEFAULT_ID).await {
-                    tracing::warn!(error = %err, "default action invocation failed");
-                }
-            });
+            let run_default = gesture.current_button() == gtk::gdk::BUTTON_PRIMARY
+                && notif.default_action.get().is_some();
+            if run_default {
+                spawn_local(async move {
+                    if let Err(err) = notif.invoke(Action::DEFAULT_ID).await {
+                        tracing::warn!(error = %err, "default action invocation failed");
+                    }
+                });
+            }
         });
         root.add_controller(click);
     }

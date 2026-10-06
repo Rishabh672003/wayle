@@ -23,7 +23,10 @@ impl WidgetTemplate for NotificationContentTemplate {
                 #[name = "app_label"]
                 gtk::Label {
                     add_css_class: "notification-popup-app",
-                    set_halign: gtk::Align::Start,
+                    // Fill + xalign instead of halign Start: a Start-aligned ellipsizing
+                    // label is sized from a slightly short measurement and gets cut.
+                    set_halign: gtk::Align::Fill,
+                    set_xalign: 0.0,
                     set_hexpand: true,
                     set_ellipsize: pango::EllipsizeMode::End,
                 },

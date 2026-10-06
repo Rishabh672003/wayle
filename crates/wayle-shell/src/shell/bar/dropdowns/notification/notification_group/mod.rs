@@ -77,7 +77,9 @@ impl FactoryComponent for NotificationGroup {
                     gtk::Box {
                         gtk::Label {
                             add_css_class: "notification-dropdown-group-name",
-                            set_halign: gtk::Align::Start,
+                            set_hexpand: true,
+                            set_halign: gtk::Align::Fill,
+                            set_xalign: 0.0,
                             set_ellipsize: gtk::pango::EllipsizeMode::End,
                             #[watch]
                             set_label: self.app_name.as_deref().unwrap_or(
