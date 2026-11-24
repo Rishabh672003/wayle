@@ -151,3 +151,4 @@ wayle-audio = { path = "../wayle-services/wayle-audio" }
 wayle-hyprland = { path = "../wayle-services/wayle-hyprland" }
 wayle-systray = { path = "../wayle-services/wayle-systray" }
 wayle-power-profiles = { path = "../wayle-services/wayle-power-profiles" }
+wayle-media = { path = "../wayle-services/wayle-media" }

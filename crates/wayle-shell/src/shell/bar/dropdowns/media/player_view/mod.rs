@@ -193,7 +193,8 @@ impl Component for PlayerView {
                         #[local_ref]
                         seek_slider -> DebouncedSlider {
                             #[watch]
-                            set_sensitive: model.can_seek,
+                            // live streams report CanSeek but have no length to seek within
+                            set_sensitive: model.can_seek && model.length.is_some(),
                         },
 
                         #[name = "progress_times"]
@@ -214,10 +215,10 @@ impl Component for PlayerView {
                                 add_css_class: "media-time",
                                 set_halign: gtk::Align::End,
                                 #[watch]
-                                set_label: &model.length.map_or_else(
-                                    || String::from("0:00"),
-                                    helpers::format_duration,
-                                ),
+                                set_label: &model
+                                    .length
+                                    .map(helpers::format_duration)
+                                    .unwrap_or_default(),
                             },
                         },
                     },
