@@ -64,7 +64,11 @@ impl FactoryComponent for NotificationItem {
                             set_hexpand: true,
                             set_halign: gtk::Align::Start,
                             set_ellipsize: gtk::pango::EllipsizeMode::End,
-                            set_label: &self.notification.summary.get(),
+                            set_use_markup: true,
+                            set_wrap: true,
+                            set_wrap_mode: gtk::pango::WrapMode::WordChar,
+                            set_lines: if self.body_in_title() { 2 } else { 1 },
+                            set_label: &self.title_markup(),
                         },
 
                         gtk::Label {
@@ -95,7 +99,8 @@ impl FactoryComponent for NotificationItem {
                             .get()
                             .as_deref()
                             .map_or_else(String::new, sanitize_markup),
-                        set_visible: self.notification.body.get().is_some(),
+                        set_visible: self.notification.body.get().is_some()
+                            && !self.body_in_title(),
                     },
                 },
             },

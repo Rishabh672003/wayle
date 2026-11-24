@@ -5,13 +5,32 @@ use wayle_notification::core::types::Action;
 use super::NotificationItem;
 use crate::{
     i18n::t,
-    shell::notification_popup::helpers::{RelativeTime, ResolvedIcon, load_scaled_file_icon},
+    shell::notification_popup::helpers::{
+        RelativeTime, ResolvedIcon, load_scaled_file_icon, sanitize_markup,
+    },
 };
 
 const MAX_ACTIONS_PER_ROW: usize = 3;
 const DROPDOWN_ICON_TEXTURE_SIZE_PX: i32 = 48;
 
 impl NotificationItem {
+    /// No summary: show the body in the title row instead of leaving it blank.
+    pub(super) fn body_in_title(&self) -> bool {
+        self.notification.summary.get().is_empty() && self.notification.body.get().is_some()
+    }
+
+    pub(super) fn title_markup(&self) -> String {
+        if self.body_in_title() {
+            return self
+                .notification
+                .body
+                .get()
+                .as_deref()
+                .map_or_else(String::new, sanitize_markup);
+        }
+        gtk::glib::markup_escape_text(&self.notification.summary.get()).to_string()
+    }
+
     pub(super) fn apply_icon(&self, icon: &gtk::Image, icon_container: &gtk::Box) {
         match &self.resolved_icon {
             ResolvedIcon::Named(name) => {

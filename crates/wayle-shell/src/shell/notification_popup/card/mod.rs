@@ -97,6 +97,7 @@ impl Component for NotificationPopupCard {
                     #[template_child]
                     title {
                         set_label: &model.notification.summary.get(),
+                        set_visible: !model.notification.summary.get().is_empty(),
                     },
                     #[template_child]
                     body {
