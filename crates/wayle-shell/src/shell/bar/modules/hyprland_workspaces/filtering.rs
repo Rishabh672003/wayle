@@ -1,17 +1,35 @@
-use std::{
-    cmp::Ordering,
-    collections::{HashMap, HashSet},
-};
+use std::collections::{HashMap, HashSet};
 
-use super::helpers::{is_special_workspace, matches_ignore_patterns};
+use wayle_hyprland::{WorkspaceAddress, WorkspaceId, WorkspaceInfo, WorkspaceKind};
+
+use super::helpers::matches_ignore_patterns;
 
 #[derive(Debug, Clone)]
 pub(crate) struct WorkspaceData {
-    pub id: String,
-    pub kind: String,
+    pub id: Option<WorkspaceId>,
+    pub address: WorkspaceAddress,
+    pub kind: WorkspaceKind,
     pub name: String,
     pub windows: u16,
     pub monitor: String,
+}
+
+/// The workspace the bar highlights as active.
+///
+/// `id` is only set for numbered workspaces.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ActiveWorkspace {
+    pub id: Option<WorkspaceId>,
+    pub address: WorkspaceAddress,
+}
+
+impl From<WorkspaceInfo> for ActiveWorkspace {
+    fn from(info: WorkspaceInfo) -> Self {
+        Self {
+            id: info.id,
+            address: info.address,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -19,56 +37,60 @@ pub(crate) struct FilterContext<'a> {
     pub show_special: bool,
     pub monitor_specific: bool,
     pub min_workspace_count: usize,
-    pub active_workspace_id: String,
+    pub active_workspace: Option<ActiveWorkspace>,
     pub bar_monitor: Option<&'a str>,
     pub ignore_patterns: &'a [String],
-    pub workspace_monitor_rules: &'a HashMap<String, String>,
+    pub workspace_monitor_rules: &'a HashMap<WorkspaceId, String>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct FilteredWorkspace {
-    pub id: String,
-    pub kind: String,
+    pub id: Option<WorkspaceId>,
+    pub address: WorkspaceAddress,
+    pub kind: WorkspaceKind,
     pub name: String,
     pub windows: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SortKey {
-    is_numeric: bool,
-    number: i64,
-    label: String,
-}
-
-impl Ord for SortKey {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self.is_numeric, other.is_numeric) {
-            (true, false) => Ordering::Less,
-            (false, true) => Ordering::Greater,
-            (true, true) => self.number.cmp(&other.number),
-            (false, false) => self.label.cmp(&other.label),
+impl FilteredWorkspace {
+    fn placeholder(id: WorkspaceId) -> Self {
+        Self {
+            id: Some(id),
+            address: WorkspaceAddress::new(id.to_string()),
+            kind: WorkspaceKind::Normal,
+            name: String::new(),
+            windows: 0,
         }
     }
-}
 
-impl PartialOrd for SortKey {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
+    /// Workspace selector for Hyprland's dispatchers.
+    ///
+    /// Numbered workspaces dispatch by number. Named and special ones go through
+    /// `name:<name>`, because Hyprland reads a bare negative or non-numeric
+    /// selector as something else. Returns `None` for an unnumbered workspace
+    /// with no name.
+    pub fn dispatch_selector(&self) -> Option<String> {
+        if let Some(id) = self.id {
+            return Some(id.to_string());
+        }
+
+        if self.name.is_empty() {
+            return None;
+        }
+
+        Some(format!("name:{}", self.name))
     }
-}
 
-fn sort_key(id: &str) -> SortKey {
-    match id.parse::<i64>() {
-        Ok(number) => SortKey {
-            is_numeric: true,
-            number,
-            label: String::new(),
-        },
-        Err(_) => SortKey {
-            is_numeric: false,
-            number: 0,
-            label: id.to_string(),
-        },
+    /// Bar order: numbered by number, then named workspaces by name, then
+    /// special workspaces by name.
+    fn display_order(&self) -> (u8, Option<WorkspaceId>, &str) {
+        let group = match (self.id, self.kind) {
+            (Some(_), _) => 0,
+            (None, WorkspaceKind::Special) => 2,
+            (None, _) => 1,
+        };
+
+        (group, self.id, &self.name)
     }
 }
 
@@ -76,49 +98,47 @@ pub(crate) fn filter_workspaces(
     workspaces: &[WorkspaceData],
     ctx: &FilterContext<'_>,
 ) -> Vec<FilteredWorkspace> {
-    let max_id = ctx.min_workspace_count as i64;
+    let max_id = WorkspaceId::try_from(ctx.min_workspace_count).unwrap_or(WorkspaceId::MAX);
 
     let mut filtered: Vec<FilteredWorkspace> = workspaces
         .iter()
         .filter(|ws| should_include_workspace(ws, ctx, max_id))
         .map(|ws| FilteredWorkspace {
-            id: ws.id.clone(),
-            kind: ws.kind.clone(),
+            id: ws.id,
+            address: ws.address.clone(),
+            kind: ws.kind,
             name: ws.name.clone(),
             windows: ws.windows,
         })
         .collect();
 
-    filtered.sort_by_key(|a| sort_key(&a.id));
-
     if ctx.min_workspace_count > 0 {
         add_placeholder_workspaces(&mut filtered, workspaces, ctx, max_id);
     }
 
-    filtered.sort_by_key(|a| sort_key(&a.id));
+    filtered.sort_by(|left, right| left.display_order().cmp(&right.display_order()));
     filtered
 }
 
-fn should_include_workspace(ws: &WorkspaceData, ctx: &FilterContext<'_>, max_id: i64) -> bool {
-    if matches_ignore_patterns(&ws.id, ctx.ignore_patterns) {
+fn should_include_workspace(
+    workspace: &WorkspaceData,
+    ctx: &FilterContext<'_>,
+    max_id: WorkspaceId,
+) -> bool {
+    if matches_ignore_patterns(&workspace.name, workspace.id, ctx.ignore_patterns) {
         return false;
     }
 
-    if is_special_workspace(&ws.id, &ws.kind) && !ctx.show_special {
+    let is_special = workspace.kind == WorkspaceKind::Special;
+    if is_special && !ctx.show_special {
         return false;
     }
 
-    if exceeds_min_count_limit(
-        &ws.id,
-        ws.windows,
-        max_id,
-        &ctx.active_workspace_id,
-        ctx.min_workspace_count,
-    ) {
+    if exceeds_min_count_limit(workspace, max_id, ctx) {
         return false;
     }
 
-    if belongs_to_different_monitor(&ws.monitor, ctx.monitor_specific, ctx.bar_monitor) {
+    if belongs_to_different_monitor(&workspace.monitor, ctx.monitor_specific, ctx.bar_monitor) {
         return false;
     }
 
@@ -126,17 +146,22 @@ fn should_include_workspace(ws: &WorkspaceData, ctx: &FilterContext<'_>, max_id:
 }
 
 fn exceeds_min_count_limit(
-    id: &str,
-    windows: u16,
-    max_id: i64,
-    active_id: &str,
-    min_count: usize,
+    workspace: &WorkspaceData,
+    max_id: WorkspaceId,
+    ctx: &FilterContext<'_>,
 ) -> bool {
-    let has_limit = min_count > 0;
-    let is_normal = id.parse::<i64>().is_ok_and(|value| value > 0);
-    let beyond_limit = id.parse::<i64>().is_ok_and(|value| value > max_id);
-    let is_active = id == active_id;
-    let is_occupied = windows > 0;
+    let Some(id) = workspace.id else {
+        return false;
+    };
+
+    let has_limit = ctx.min_workspace_count > 0;
+    let is_normal = id > 0;
+    let beyond_limit = id > max_id;
+    let is_active = ctx
+        .active_workspace
+        .as_ref()
+        .is_some_and(|active| active.address == workspace.address);
+    let is_occupied = workspace.windows > 0;
 
     has_limit && is_normal && beyond_limit && !is_active && !is_occupied
 }
@@ -159,24 +184,25 @@ fn add_placeholder_workspaces(
     filtered: &mut Vec<FilteredWorkspace>,
     all_workspaces: &[WorkspaceData],
     ctx: &FilterContext<'_>,
-    max_id: i64,
+    max_id: WorkspaceId,
 ) {
-    let mut existing_ids: HashSet<String> = filtered
+    let existing_numbered = all_workspaces
         .iter()
-        .map(|ws| ws.id.clone())
-        .chain(all_workspaces.iter().map(|ws| ws.id.clone()).filter(|id| {
-            id.parse::<i64>()
-                .is_ok_and(|value| value > 0 && value <= max_id)
-        }))
+        .filter_map(|ws| ws.id)
+        .filter(|id| *id > 0 && *id <= max_id);
+
+    let mut existing_ids: HashSet<WorkspaceId> = filtered
+        .iter()
+        .filter_map(|ws| ws.id)
+        .chain(existing_numbered)
         .collect();
 
     for id in 1..=max_id {
-        let id_str = id.to_string();
-        if existing_ids.contains(&id_str) {
+        if existing_ids.contains(&id) {
             continue;
         }
 
-        if matches_ignore_patterns(&id_str, ctx.ignore_patterns) {
+        if matches_ignore_patterns("", Some(id), ctx.ignore_patterns) {
             continue;
         }
 
@@ -184,41 +210,33 @@ fn add_placeholder_workspaces(
             let Some(bar_monitor) = ctx.bar_monitor else {
                 continue;
             };
-            let rule_monitor = ctx.workspace_monitor_rules.get(&id_str);
+            let rule_monitor = ctx.workspace_monitor_rules.get(&id);
             if rule_monitor.map(String::as_str) != Some(bar_monitor) {
                 continue;
             }
         }
 
-        filtered.push(FilteredWorkspace {
-            id: id_str.clone(),
-            kind: "numbered".to_string(),
-            name: String::new(),
-            windows: 0,
-        });
-        existing_ids.insert(id_str);
+        filtered.push(FilteredWorkspace::placeholder(id));
+        existing_ids.insert(id);
     }
 
-    if ctx
-        .active_workspace_id
-        .parse::<i64>()
-        .is_ok_and(|value| value > 0)
-        && !existing_ids.contains(&ctx.active_workspace_id)
-        && !matches_ignore_patterns(&ctx.active_workspace_id, ctx.ignore_patterns)
-        && should_include_active_workspace_placeholder(all_workspaces, ctx)
+    let Some(active_id) = ctx.active_workspace.as_ref().and_then(|active| active.id) else {
+        return;
+    };
+
+    if active_id > 0
+        && !existing_ids.contains(&active_id)
+        && !matches_ignore_patterns("", Some(active_id), ctx.ignore_patterns)
+        && should_include_active_workspace_placeholder(all_workspaces, ctx, active_id)
     {
-        filtered.push(FilteredWorkspace {
-            id: ctx.active_workspace_id.clone(),
-            kind: "numbered".to_string(),
-            name: String::new(),
-            windows: 0,
-        });
+        filtered.push(FilteredWorkspace::placeholder(active_id));
     }
 }
 
 fn should_include_active_workspace_placeholder(
     all_workspaces: &[WorkspaceData],
     ctx: &FilterContext<'_>,
+    active_id: WorkspaceId,
 ) -> bool {
     if !ctx.monitor_specific {
         return true;
@@ -230,11 +248,11 @@ fn should_include_active_workspace_placeholder(
 
     let active_monitor = all_workspaces
         .iter()
-        .find(|ws| ws.id == ctx.active_workspace_id)
+        .find(|ws| ws.id == Some(active_id))
         .map(|ws| ws.monitor.as_str())
         .or_else(|| {
             ctx.workspace_monitor_rules
-                .get(&ctx.active_workspace_id)
+                .get(&active_id)
                 .map(String::as_str)
         });
 
@@ -243,29 +261,32 @@ fn should_include_active_workspace_placeholder(
 
 pub(crate) fn monitor_workspaces_sorted(
     bar_monitor: &str,
-    workspace_monitor_rules: &HashMap<String, String>,
-) -> Vec<String> {
+    workspace_monitor_rules: &HashMap<WorkspaceId, String>,
+) -> Vec<WorkspaceId> {
     let mut matching: Vec<_> = workspace_monitor_rules
         .iter()
         .filter(|(_, monitor)| monitor.as_str() == bar_monitor)
-        .map(|(id, _)| id.clone())
-        .filter(|id| id.parse::<i64>().is_ok_and(|value| value > 0))
+        .map(|(id, _)| *id)
+        .filter(|id| *id > 0)
         .collect();
 
-    matching.sort_by_key(|a| sort_key(a));
+    matching.sort_unstable();
     matching
 }
 
-pub(crate) fn relative_workspace_number(id: &str, monitor_workspaces: &[String]) -> String {
+pub(crate) fn relative_workspace_number(
+    id: WorkspaceId,
+    monitor_workspaces: &[WorkspaceId],
+) -> WorkspaceId {
     if monitor_workspaces.is_empty() {
-        return id.to_string();
+        return id;
     }
 
     monitor_workspaces
         .iter()
-        .position(|ws_id| ws_id == id)
-        .map(|pos| (pos + 1).to_string())
-        .unwrap_or_else(|| id.to_string())
+        .position(|&ws_id| ws_id == id)
+        .map(|pos| (pos + 1) as WorkspaceId)
+        .unwrap_or(id)
 }
 
 pub(crate) fn calculate_navigation_index(
@@ -289,155 +310,127 @@ mod tests {
     mod filter_workspaces {
         use super::*;
 
-        fn make_workspace(id: &str, monitor: &str) -> WorkspaceData {
+        fn make_workspace(id: WorkspaceId, monitor: &str) -> WorkspaceData {
             WorkspaceData {
-                id: id.to_string(),
-                kind: "numbered".to_string(),
+                id: Some(id),
+                address: WorkspaceAddress::new(id.to_string()),
+                kind: WorkspaceKind::Normal,
                 name: id.to_string(),
                 windows: 1,
                 monitor: monitor.to_string(),
             }
         }
 
-        fn make_empty_workspace(id: &str, monitor: &str) -> WorkspaceData {
+        fn make_empty_workspace(id: WorkspaceId, monitor: &str) -> WorkspaceData {
             WorkspaceData {
-                id: id.to_string(),
-                kind: "numbered".to_string(),
-                name: id.to_string(),
                 windows: 0,
-                monitor: monitor.to_string(),
+                ..make_workspace(id, monitor)
             }
         }
 
-        fn make_special_workspace(id: &str, kind: &str, monitor: &str) -> WorkspaceData {
+        fn make_unnumbered_workspace(name: &str, kind: WorkspaceKind) -> WorkspaceData {
             WorkspaceData {
-                id: id.to_string(),
-                kind: kind.to_string(),
-                name: id.to_string(),
-                windows: 0,
-                monitor: monitor.to_string(),
+                id: None,
+                address: WorkspaceAddress::new(name),
+                kind,
+                name: name.to_string(),
+                windows: 1,
+                monitor: "DP-1".to_string(),
             }
+        }
+
+        fn active(id: WorkspaceId) -> ActiveWorkspace {
+            ActiveWorkspace {
+                id: Some(id),
+                address: WorkspaceAddress::new(id.to_string()),
+            }
+        }
+
+        fn numbered_ids(workspaces: &[FilteredWorkspace]) -> Vec<WorkspaceId> {
+            workspaces
+                .iter()
+                .filter_map(|workspace| workspace.id)
+                .collect()
+        }
+
+        fn addresses(workspaces: &[FilteredWorkspace]) -> Vec<&str> {
+            workspaces
+                .iter()
+                .map(|workspace| workspace.address.as_str())
+                .collect()
         }
 
         #[test]
         fn filters_by_monitor_when_monitor_specific() {
             let workspaces = vec![
-                make_workspace("1", "DP-1"),
-                make_workspace("2", "DP-2"),
-                make_workspace("3", "DP-1"),
+                make_workspace(1, "DP-1"),
+                make_workspace(2, "DP-2"),
+                make_workspace(3, "DP-1"),
             ];
 
             let ctx = FilterContext {
                 show_special: false,
                 monitor_specific: true,
                 min_workspace_count: 0,
-                active_workspace_id: "1".to_string(),
+                active_workspace: Some(active(1)),
                 bar_monitor: Some("DP-1"),
                 ignore_patterns: &[],
                 workspace_monitor_rules: &HashMap::new(),
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
-            assert_eq!(ids, vec!["1", "3"]);
+            let ids = numbered_ids(&result);
+            assert_eq!(ids, vec![1, 3]);
         }
 
         #[test]
-        fn excludes_special_workspaces_by_default() {
+        fn excludes_special_workspaces_when_disabled() {
             let workspaces = vec![
-                make_workspace("1", "DP-1"),
-                make_special_workspace("special:magic", "special", "DP-1"),
+                make_workspace(1, "DP-1"),
+                make_unnumbered_workspace("special:scratch", WorkspaceKind::Special),
             ];
 
             let ctx = FilterContext {
                 show_special: false,
                 monitor_specific: false,
                 min_workspace_count: 0,
-                active_workspace_id: "1".to_string(),
+                active_workspace: Some(active(1)),
                 bar_monitor: None,
                 ignore_patterns: &[],
                 workspace_monitor_rules: &HashMap::new(),
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
-            assert_eq!(ids, vec!["1"]);
-        }
-
-        #[test]
-        fn excludes_legacy_special_negative_ids_by_default() {
-            let workspaces = vec![
-                make_workspace("1", "DP-1"),
-                make_special_workspace("-99", "special", "DP-1"),
-            ];
-
-            let ctx = FilterContext {
-                show_special: false,
-                monitor_specific: false,
-                min_workspace_count: 0,
-                active_workspace_id: "1".to_string(),
-                bar_monitor: None,
-                ignore_patterns: &[],
-                workspace_monitor_rules: &HashMap::new(),
-            };
-
-            let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
-            assert_eq!(ids, vec!["1"]);
+            assert_eq!(addresses(&result), vec!["1"]);
         }
 
         #[test]
         fn includes_special_when_enabled() {
             let workspaces = vec![
-                make_workspace("1", "DP-1"),
-                make_special_workspace("special:magic", "special", "DP-1"),
+                make_workspace(1, "DP-1"),
+                make_unnumbered_workspace("special:scratch", WorkspaceKind::Special),
             ];
 
             let ctx = FilterContext {
                 show_special: true,
                 monitor_specific: false,
                 min_workspace_count: 0,
-                active_workspace_id: "1".to_string(),
+                active_workspace: Some(active(1)),
                 bar_monitor: None,
                 ignore_patterns: &[],
                 workspace_monitor_rules: &HashMap::new(),
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
-            assert_eq!(ids, vec!["1", "special:magic"]);
-        }
-
-        #[test]
-        fn sorts_numeric_before_named() {
-            let workspaces = vec![
-                make_workspace("web", "DP-1"),
-                make_workspace("2", "DP-1"),
-                make_workspace("10", "DP-1"),
-                make_workspace("1", "DP-1"),
-            ];
-
-            let ctx = FilterContext {
-                show_special: false,
-                monitor_specific: false,
-                min_workspace_count: 0,
-                active_workspace_id: "1".to_string(),
-                bar_monitor: None,
-                ignore_patterns: &[],
-                workspace_monitor_rules: &HashMap::new(),
-            };
-
-            let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
-            assert_eq!(ids, vec!["1", "2", "10", "web"]);
+            assert_eq!(addresses(&result), vec!["1", "special:scratch"]);
         }
 
         #[test]
         fn respects_ignore_patterns() {
             let workspaces = vec![
-                make_workspace("1", "DP-1"),
-                make_workspace("2", "DP-1"),
-                make_workspace("10", "DP-1"),
+                make_workspace(1, "DP-1"),
+                make_workspace(2, "DP-1"),
+                make_workspace(10, "DP-1"),
             ];
 
             let patterns = vec!["10".to_string()];
@@ -445,311 +438,403 @@ mod tests {
                 show_special: false,
                 monitor_specific: false,
                 min_workspace_count: 0,
-                active_workspace_id: "1".to_string(),
+                active_workspace: Some(active(1)),
                 bar_monitor: None,
                 ignore_patterns: &patterns,
                 workspace_monitor_rules: &HashMap::new(),
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
-            assert_eq!(ids, vec!["1", "2"]);
+            let ids = numbered_ids(&result);
+            assert_eq!(ids, vec![1, 2]);
         }
 
         #[test]
         fn adds_placeholder_workspaces_up_to_min_count() {
-            let workspaces = vec![make_workspace("1", "DP-1")];
+            let workspaces = vec![make_workspace(1, "DP-1")];
 
             let ctx = FilterContext {
                 show_special: false,
                 monitor_specific: false,
                 min_workspace_count: 3,
-                active_workspace_id: "1".to_string(),
+                active_workspace: Some(active(1)),
                 bar_monitor: None,
                 ignore_patterns: &[],
                 workspace_monitor_rules: &HashMap::new(),
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
-            assert_eq!(ids, vec!["1", "2", "3"]);
+            let ids = numbered_ids(&result);
+            assert_eq!(ids, vec![1, 2, 3]);
         }
 
         #[test]
         fn always_includes_active_workspace() {
-            let workspaces = vec![make_workspace("1", "DP-1")];
+            let workspaces = vec![make_workspace(1, "DP-1")];
 
             let ctx = FilterContext {
                 show_special: false,
                 monitor_specific: false,
                 min_workspace_count: 3,
-                active_workspace_id: "5".to_string(),
+                active_workspace: Some(active(5)),
                 bar_monitor: None,
                 ignore_patterns: &[],
                 workspace_monitor_rules: &HashMap::new(),
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
-            assert!(ids.contains(&"5"));
+            let ids = numbered_ids(&result);
+            assert!(ids.contains(&5));
         }
 
         #[test]
         fn includes_occupied_workspace_beyond_min_count_limit() {
-            let workspaces = vec![make_workspace("1", "DP-1"), make_workspace("9", "DP-1")];
+            let workspaces = vec![make_workspace(1, "DP-1"), make_workspace(9, "DP-1")];
 
             let ctx = FilterContext {
                 show_special: false,
                 monitor_specific: false,
                 min_workspace_count: 8,
-                active_workspace_id: "1".to_string(),
+                active_workspace: Some(active(1)),
                 bar_monitor: None,
                 ignore_patterns: &[],
                 workspace_monitor_rules: &HashMap::new(),
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
-            assert!(ids.contains(&"9"));
+            let ids = numbered_ids(&result);
+            assert!(ids.contains(&9));
         }
 
         #[test]
         fn excludes_empty_workspace_beyond_min_count_limit_when_not_active() {
-            let workspaces = vec![
-                make_workspace("1", "DP-1"),
-                make_empty_workspace("9", "DP-1"),
-            ];
+            let workspaces = vec![make_workspace(1, "DP-1"), make_empty_workspace(9, "DP-1")];
 
             let ctx = FilterContext {
                 show_special: false,
                 monitor_specific: false,
                 min_workspace_count: 8,
-                active_workspace_id: "1".to_string(),
+                active_workspace: Some(active(1)),
                 bar_monitor: None,
                 ignore_patterns: &[],
                 workspace_monitor_rules: &HashMap::new(),
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
-            assert!(!ids.contains(&"9"));
+            let ids = numbered_ids(&result);
+            assert!(!ids.contains(&9));
         }
 
         #[test]
         fn monitor_specific_does_not_readd_active_workspace_from_other_monitor() {
-            let workspaces = vec![make_workspace("1", "DP-1"), make_workspace("9", "DP-2")];
+            let workspaces = vec![make_workspace(1, "DP-1"), make_workspace(9, "DP-2")];
 
             let ctx = FilterContext {
                 show_special: false,
                 monitor_specific: true,
                 min_workspace_count: 8,
-                active_workspace_id: "9".to_string(),
+                active_workspace: Some(active(9)),
                 bar_monitor: Some("DP-1"),
                 ignore_patterns: &[],
                 workspace_monitor_rules: &HashMap::new(),
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
-            assert!(!ids.contains(&"9"));
+            let ids = numbered_ids(&result);
+            assert!(!ids.contains(&9));
         }
 
         #[test]
         fn monitor_specific_does_not_readd_active_workspace_from_other_monitor_rule() {
-            let workspaces = vec![make_workspace("1", "DP-1")];
+            let workspaces = vec![make_workspace(1, "DP-1")];
             let mut rules = HashMap::new();
-            rules.insert("9".to_string(), "DP-2".to_string());
+            rules.insert(9, "DP-2".to_string());
 
             let ctx = FilterContext {
                 show_special: false,
                 monitor_specific: true,
                 min_workspace_count: 8,
-                active_workspace_id: "9".to_string(),
+                active_workspace: Some(active(9)),
                 bar_monitor: Some("DP-1"),
                 ignore_patterns: &[],
                 workspace_monitor_rules: &rules,
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
-            assert!(!ids.contains(&"9"));
+            let ids = numbered_ids(&result);
+            assert!(!ids.contains(&9));
         }
 
         #[test]
         fn monitor_specific_includes_occupied_workspace_beyond_min_count_on_bar_monitor() {
-            let workspaces = vec![make_workspace("1", "DP-1"), make_workspace("9", "DP-1")];
+            let workspaces = vec![make_workspace(1, "DP-1"), make_workspace(9, "DP-1")];
 
             let ctx = FilterContext {
                 show_special: false,
                 monitor_specific: true,
                 min_workspace_count: 8,
-                active_workspace_id: "1".to_string(),
+                active_workspace: Some(active(1)),
                 bar_monitor: Some("DP-1"),
                 ignore_patterns: &[],
                 workspace_monitor_rules: &HashMap::new(),
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
-            assert!(ids.contains(&"9"));
+            let ids = numbered_ids(&result);
+            assert!(ids.contains(&9));
         }
 
         #[test]
         fn monitor_specific_excludes_occupied_workspace_beyond_min_count_on_other_monitor() {
-            let workspaces = vec![make_workspace("1", "DP-1"), make_workspace("9", "DP-2")];
+            let workspaces = vec![make_workspace(1, "DP-1"), make_workspace(9, "DP-2")];
 
             let ctx = FilterContext {
                 show_special: false,
                 monitor_specific: true,
                 min_workspace_count: 8,
-                active_workspace_id: "1".to_string(),
+                active_workspace: Some(active(1)),
                 bar_monitor: Some("DP-1"),
                 ignore_patterns: &[],
                 workspace_monitor_rules: &HashMap::new(),
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
-            assert!(!ids.contains(&"9"));
+            let ids = numbered_ids(&result);
+            assert!(!ids.contains(&9));
         }
 
         #[test]
         fn monitor_specific_readds_active_workspace_placeholder_when_rule_matches_bar_monitor() {
-            let workspaces = vec![make_workspace("1", "DP-1")];
+            let workspaces = vec![make_workspace(1, "DP-1")];
             let mut rules = HashMap::new();
-            rules.insert("9".to_string(), "DP-1".to_string());
+            rules.insert(9, "DP-1".to_string());
 
             let ctx = FilterContext {
                 show_special: false,
                 monitor_specific: true,
                 min_workspace_count: 8,
-                active_workspace_id: "9".to_string(),
+                active_workspace: Some(active(9)),
                 bar_monitor: Some("DP-1"),
                 ignore_patterns: &[],
                 workspace_monitor_rules: &rules,
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
-            assert!(ids.contains(&"9"));
+            let ids = numbered_ids(&result);
+            assert!(ids.contains(&9));
         }
 
         #[test]
         fn monitor_specific_placeholders_require_explicit_rules() {
-            let workspaces = vec![make_workspace("1", "DP-1")];
+            let workspaces = vec![make_workspace(1, "DP-1")];
 
             let mut rules = HashMap::new();
-            rules.insert("1".to_string(), "DP-1".to_string());
-            rules.insert("3".to_string(), "DP-1".to_string());
+            rules.insert(1, "DP-1".to_string());
+            rules.insert(3, "DP-1".to_string());
 
             let ctx = FilterContext {
                 show_special: false,
                 monitor_specific: true,
                 min_workspace_count: 5,
-                active_workspace_id: "1".to_string(),
+                active_workspace: Some(active(1)),
                 bar_monitor: Some("DP-1"),
                 ignore_patterns: &[],
                 workspace_monitor_rules: &rules,
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
+            let ids = numbered_ids(&result);
 
-            assert!(ids.contains(&"1"));
-            assert!(ids.contains(&"3"));
-            assert!(!ids.contains(&"2"));
-            assert!(!ids.contains(&"4"));
-            assert!(!ids.contains(&"5"));
+            assert!(ids.contains(&1));
+            assert!(ids.contains(&3));
+            assert!(!ids.contains(&2));
+            assert!(!ids.contains(&4));
+            assert!(!ids.contains(&5));
         }
 
         #[test]
         fn global_mode_adds_all_placeholders() {
-            let workspaces = vec![make_workspace("1", "DP-1")];
+            let workspaces = vec![make_workspace(1, "DP-1")];
 
             let ctx = FilterContext {
                 show_special: false,
                 monitor_specific: false,
                 min_workspace_count: 5,
-                active_workspace_id: "1".to_string(),
+                active_workspace: Some(active(1)),
                 bar_monitor: None,
                 ignore_patterns: &[],
                 workspace_monitor_rules: &HashMap::new(),
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
+            let ids = numbered_ids(&result);
 
-            assert_eq!(ids, vec!["1", "2", "3", "4", "5"]);
+            assert_eq!(ids, vec![1, 2, 3, 4, 5]);
         }
 
         #[test]
         fn placeholders_respect_ignore_patterns() {
-            let workspaces = vec![make_workspace("1", "DP-1")];
+            let workspaces = vec![make_workspace(1, "DP-1")];
             let patterns = vec!["3".to_string(), "5".to_string()];
 
             let ctx = FilterContext {
                 show_special: false,
                 monitor_specific: false,
                 min_workspace_count: 5,
-                active_workspace_id: "1".to_string(),
+                active_workspace: Some(active(1)),
                 bar_monitor: None,
                 ignore_patterns: &patterns,
                 workspace_monitor_rules: &HashMap::new(),
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
+            let ids = numbered_ids(&result);
 
-            assert_eq!(ids, vec!["1", "2", "4"]);
+            assert_eq!(ids, vec![1, 2, 4]);
         }
 
         #[test]
         fn active_workspace_respects_ignore_patterns() {
-            let workspaces = vec![make_workspace("1", "DP-1")];
+            let workspaces = vec![make_workspace(1, "DP-1")];
             let patterns = vec!["10".to_string()];
 
             let ctx = FilterContext {
                 show_special: false,
                 monitor_specific: false,
                 min_workspace_count: 5,
-                active_workspace_id: "10".to_string(),
+                active_workspace: Some(active(10)),
                 bar_monitor: None,
                 ignore_patterns: &patterns,
                 workspace_monitor_rules: &HashMap::new(),
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
+            let ids = numbered_ids(&result);
 
-            assert!(!ids.contains(&"10"));
+            assert!(!ids.contains(&10));
         }
 
         #[test]
-        fn named_workspace_not_subject_to_min_count_limit() {
+        fn shows_named_workspaces_when_special_disabled() {
             let workspaces = vec![
-                make_workspace("1", "DP-1"),
-                WorkspaceData {
-                    id: "web".to_string(),
-                    kind: "named".to_string(),
-                    name: "web".to_string(),
-                    windows: 0,
-                    monitor: "DP-1".to_string(),
-                },
+                make_workspace(1, "DP-1"),
+                make_unnumbered_workspace("music", WorkspaceKind::Normal),
             ];
 
             let ctx = FilterContext {
                 show_special: false,
                 monitor_specific: false,
-                min_workspace_count: 1,
-                active_workspace_id: "1".to_string(),
+                min_workspace_count: 0,
+                active_workspace: Some(active(1)),
                 bar_monitor: None,
                 ignore_patterns: &[],
                 workspace_monitor_rules: &HashMap::new(),
             };
 
             let result = filter_workspaces(&workspaces, &ctx);
-            let ids: Vec<_> = result.iter().map(|ws| ws.id.as_str()).collect();
-            assert!(ids.contains(&"web"));
+            assert_eq!(addresses(&result), vec!["1", "music"]);
+        }
+
+        #[test]
+        fn orders_numbered_then_named_then_special() {
+            let workspaces = vec![
+                make_workspace(2, "DP-1"),
+                make_unnumbered_workspace("special:scratch", WorkspaceKind::Special),
+                make_workspace(1, "DP-1"),
+                make_unnumbered_workspace("web", WorkspaceKind::Normal),
+                make_unnumbered_workspace("chat", WorkspaceKind::Normal),
+            ];
+
+            let ctx = FilterContext {
+                show_special: true,
+                monitor_specific: false,
+                min_workspace_count: 0,
+                active_workspace: Some(active(1)),
+                bar_monitor: None,
+                ignore_patterns: &[],
+                workspace_monitor_rules: &HashMap::new(),
+            };
+
+            let result = filter_workspaces(&workspaces, &ctx);
+            assert_eq!(
+                addresses(&result),
+                vec!["1", "2", "chat", "web", "special:scratch"]
+            );
+        }
+
+        #[test]
+        fn ignore_patterns_match_named_workspaces_by_name() {
+            let workspaces = vec![
+                make_workspace(1, "DP-1"),
+                make_unnumbered_workspace("music", WorkspaceKind::Normal),
+            ];
+            let patterns = vec!["mus*".to_string()];
+
+            let ctx = FilterContext {
+                show_special: false,
+                monitor_specific: false,
+                min_workspace_count: 0,
+                active_workspace: Some(active(1)),
+                bar_monitor: None,
+                ignore_patterns: &patterns,
+                workspace_monitor_rules: &HashMap::new(),
+            };
+
+            let result = filter_workspaces(&workspaces, &ctx);
+            assert_eq!(addresses(&result), vec!["1"]);
+        }
+
+        #[test]
+        fn placeholders_use_the_number_as_address() {
+            let workspaces = vec![make_workspace(1, "DP-1")];
+
+            let ctx = FilterContext {
+                show_special: false,
+                monitor_specific: false,
+                min_workspace_count: 2,
+                active_workspace: Some(active(1)),
+                bar_monitor: None,
+                ignore_patterns: &[],
+                workspace_monitor_rules: &HashMap::new(),
+            };
+
+            let result = filter_workspaces(&workspaces, &ctx);
+            assert_eq!(addresses(&result), vec!["1", "2"]);
+        }
+    }
+
+    mod dispatch_selector {
+        use super::*;
+
+        fn workspace(id: Option<WorkspaceId>, name: &str) -> FilteredWorkspace {
+            FilteredWorkspace {
+                id,
+                address: WorkspaceAddress::new(name),
+                kind: WorkspaceKind::Normal,
+                name: name.to_string(),
+                windows: 0,
+            }
+        }
+
+        #[test]
+        fn numbered_workspace_dispatches_by_number() {
+            assert_eq!(
+                workspace(Some(3), "3").dispatch_selector().as_deref(),
+                Some("3")
+            );
+        }
+
+        #[test]
+        fn named_workspace_dispatches_by_name() {
+            assert_eq!(
+                workspace(None, "music").dispatch_selector().as_deref(),
+                Some("name:music")
+            );
+        }
+
+        #[test]
+        fn unnumbered_workspace_without_name_has_no_selector() {
+            assert_eq!(workspace(None, "").dispatch_selector(), None);
         }
     }
 
@@ -758,19 +843,19 @@ mod tests {
 
         #[test]
         fn returns_id_when_empty_list() {
-            assert_eq!(relative_workspace_number("5", &[]), "5");
+            assert_eq!(relative_workspace_number(5, &[]), 5);
         }
 
         #[test]
         fn returns_position_plus_one() {
-            let workspaces = vec!["4".to_string(), "5".to_string(), "6".to_string()];
-            assert_eq!(relative_workspace_number("5", &workspaces), "2");
+            let workspaces = vec![4, 5, 6];
+            assert_eq!(relative_workspace_number(5, &workspaces), 2);
         }
 
         #[test]
         fn returns_id_when_not_found() {
-            let workspaces = vec!["1".to_string(), "2".to_string(), "3".to_string()];
-            assert_eq!(relative_workspace_number("10", &workspaces), "10");
+            let workspaces = vec![1, 2, 3];
+            assert_eq!(relative_workspace_number(10, &workspaces), 10);
         }
     }
 
@@ -804,23 +889,23 @@ mod tests {
         #[test]
         fn filters_and_sorts() {
             let mut rules = HashMap::new();
-            rules.insert("5".to_string(), "DP-1".to_string());
-            rules.insert("1".to_string(), "DP-1".to_string());
-            rules.insert("3".to_string(), "DP-2".to_string());
-            rules.insert("2".to_string(), "DP-1".to_string());
+            rules.insert(5, "DP-1".to_string());
+            rules.insert(1, "DP-1".to_string());
+            rules.insert(3, "DP-2".to_string());
+            rules.insert(2, "DP-1".to_string());
 
             let result = monitor_workspaces_sorted("DP-1", &rules);
-            assert_eq!(result, vec!["1", "2", "5"]);
+            assert_eq!(result, vec![1, 2, 5]);
         }
 
         #[test]
         fn excludes_negative_ids() {
             let mut rules = HashMap::new();
-            rules.insert("1".to_string(), "DP-1".to_string());
-            rules.insert("-99".to_string(), "DP-1".to_string());
+            rules.insert(1, "DP-1".to_string());
+            rules.insert(-99, "DP-1".to_string());
 
             let result = monitor_workspaces_sorted("DP-1", &rules);
-            assert_eq!(result, vec!["1"]);
+            assert_eq!(result, vec![1]);
         }
     }
 }

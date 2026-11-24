@@ -1,8 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
 use wayle_config::ConfigService;
-use wayle_hyprland::{Address, HyprlandService};
+use wayle_hyprland::{Address, HyprlandService, WorkspaceAddress, WorkspaceId};
 use wayle_widgets::prelude::BarSettings;
+
+use super::filtering::ActiveWorkspace;
 
 pub(crate) struct WorkspacesInit {
     pub settings: BarSettings,
@@ -12,7 +14,7 @@ pub(crate) struct WorkspacesInit {
 
 #[derive(Debug)]
 pub(crate) enum WorkspacesMsg {
-    WorkspaceClicked(String),
+    WorkspaceClicked(WorkspaceAddress),
     ScrollUp,
     ScrollDown,
 }
@@ -21,10 +23,10 @@ pub(crate) enum WorkspacesMsg {
 pub(crate) enum WorkspacesCmd {
     WorkspacesChanged,
     ClientsChanged,
-    ActiveWorkspaceChanged(String),
+    ActiveWorkspaceChanged(ActiveWorkspace),
     MonitorFocused {
         monitor: String,
-        workspace_id: String,
+        workspace: Option<ActiveWorkspace>,
     },
     TitleChanged,
     ConfigChanged,
@@ -32,5 +34,5 @@ pub(crate) enum WorkspacesCmd {
     UrgentWindow(Address),
     WindowFocused(Address),
     BlinkTick,
-    WorkspaceRulesLoaded(HashMap<String, String>),
+    WorkspaceRulesLoaded(HashMap<WorkspaceId, String>),
 }

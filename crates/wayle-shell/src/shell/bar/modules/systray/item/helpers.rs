@@ -69,10 +69,10 @@ pub(super) fn load_icon_from_theme_path(theme_path: &str, icon_name: &str) -> Op
 }
 
 fn argb_to_rgba(argb: &[u8]) -> Vec<u8> {
-    argb.as_chunks::<4>()
-        .0
+    let (pixels, _) = argb.as_chunks::<4>();
+    pixels
         .iter()
-        .flat_map(|[a, r, g, b]| [*r, *g, *b, *a])
+        .flat_map(|&[alpha, red, green, blue]| [red, green, blue, alpha])
         .collect()
 }
 
